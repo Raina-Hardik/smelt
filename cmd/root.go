@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -16,11 +15,15 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:   "smelt",
 	Short: "Highly parallel ffmpeg-powered media transcoder",
-	Long: `smelt scans a media library directory and transcodes files using
-ffmpeg, with configurable concurrency, codec targets, and output modes.`,
+	Long: `Smelt is a highly parallel, ffmpeg-powered media transcoding CLI and TUI.
+
+It scans a source directory, applies configured codec targets, and transcodes
+files concurrently — with live progress in the TUI or structured log output
+in daemon and pipe mode.`,
 	SilenceUsage: true,
 }
 
+// Execute is the entry point called from main.go.
 func Execute() {
 	initLogger()
 	if err := rootCmd.Execute(); err != nil {
@@ -31,20 +34,21 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./config.yaml)")
-	rootCmd.PersistentFlags().String("log-level", "info", "log level: trace|debug|info|warn|error")
-	rootCmd.PersistentFlags().String("src", ".", "source directory to scan")
-	rootCmd.PersistentFlags().StringSlice("ext", []string{"mkv", "mp4"}, "file extensions to match")
-	rootCmd.PersistentFlags().String("codec", "h265", "target video codec (h265, h264, av1, vp9)")
-	rootCmd.PersistentFlags().Int("workers", runtime.NumCPU(), "maximum parallel transcoding jobs")
-	rootCmd.PersistentFlags().Bool("inplace", false, "replace original file after successful transcode")
+	rootCmd.PersistentFlags().StringVar(
+		&cfgFile, "config", "",
+		"path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml",
+	)
+	rootCmd.PersistentFlags().String(
+		"log-level", "info",
+		"log level: debug|info|warn|error",
+	)
+	rootCmd.PersistentFlags().String(
+		"log-format", "auto",
+		"log output format: auto|json|pretty",
+	)
 
-	_ = viper.BindPFlag("log_level", rootCmd.PersistentFlags().Lookup("log-level"))
-	_ = viper.BindPFlag("src", rootCmd.PersistentFlags().Lookup("src"))
-	_ = viper.BindPFlag("ext", rootCmd.PersistentFlags().Lookup("ext"))
-	_ = viper.BindPFlag("codec", rootCmd.PersistentFlags().Lookup("codec"))
-	_ = viper.BindPFlag("workers", rootCmd.PersistentFlags().Lookup("workers"))
-	_ = viper.BindPFlag("inplace", rootCmd.PersistentFlags().Lookup("inplace"))
+	_ = viper.BindPFlag("smelt.log_level", rootCmd.PersistentFlags().Lookup("log-level"))
+	_ = viper.BindPFlag("smelt.log_format", rootCmd.PersistentFlags().Lookup("log-format"))
 }
 
 func initLogger() {
