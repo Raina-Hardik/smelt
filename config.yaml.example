@@ -1,0 +1,32 @@
+# smelt configuration
+# Copy to config.yaml or pass --config /path/to/config.yaml
+#
+# All values can be overridden with flags or SMELT_* env vars.
+# Example: SMELT_WORKERS=16 smelt transcode
+
+# Source directory to scan for media files.
+src: /mnt/media
+
+# File extensions to transcode (case-insensitive, without leading dot).
+ext:
+  - mkv
+  - mp4
+  - avi
+  - mov
+
+# Target video codec.
+# Supported aliases: h265 / hevc, h264 / avc, av1, vp9
+# Pass any ffmpeg encoder name directly for anything else (e.g. libvpx).
+codec: h265
+
+# Maximum number of files to transcode in parallel.
+# Defaults to the number of logical CPU cores.
+workers: 4
+
+# Replace the original file with the transcoded output on success.
+# When false (default) the output is placed alongside the original
+# as <name>.transcoded<ext>.
+inplace: false
+
+# Log level: trace | debug | info | warn | error
+log_level: info
