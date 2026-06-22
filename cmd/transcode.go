@@ -41,6 +41,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	configureLogger(cfg.LogLevel, cfg.LogFormat)
 
 	files, err := scanner.Scan(cfg.Src, cfg.Ext)
 	if err != nil {

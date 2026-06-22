@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -65,17 +67,40 @@ func init() {
 	_ = viper.BindPFlag("smelt.assume_yes", rootCmd.PersistentFlags().Lookup("assume-yes"))
 }
 
-func initLogger() {
-	fi, err := os.Stdout.Stat()
-	isTTY := err == nil && (fi.Mode()&os.ModeCharDevice) != 0
-	if isTTY {
-		log.Logger = zerolog.New(zerolog.ConsoleWriter{
-			Out:        os.Stderr,
-			TimeFormat: time.Kitchen,
-		}).With().Timestamp().Logger()
-	} else {
-		log.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
+// initLogger installs a sensible default before flags/config are resolved.
+// configureLogger is called again from the command path once *Config is loaded.
+func initLogger() { configureLogger("info", "auto") }
+
+// configureLogger reconfigures the global zerolog logger from resolved config.
+// level: debug|info|warn|error (unknown → info).
+// format: auto (pretty when stderr is a TTY) | json | pretty.
+func configureLogger(level, format string) {
+	lvl, err := zerolog.ParseLevel(strings.ToLower(level))
+	if err != nil || level == "" {
+		lvl = zerolog.InfoLevel
 	}
+	zerolog.SetGlobalLevel(lvl)
+
+	var pretty bool
+	switch strings.ToLower(format) {
+	case "json":
+		pretty = false
+	case "pretty":
+		pretty = true
+	default: // auto
+		pretty = stderrIsTTY()
+	}
+
+	var w io.Writer = os.Stderr
+	if pretty {
+		w = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.Kitchen}
+	}
+	log.Logger = zerolog.New(w).With().Timestamp().Logger()
+}
+
+func stderrIsTTY() bool {
+	fi, err := os.Stderr.Stat()
+	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
 }
 
 func initConfig() {
