@@ -53,10 +53,10 @@ Scan a source directory recursively for media files matching the configured
 extensions, then transcode each file using ffmpeg. Jobs run in parallel up to
 `--workers`, with progress reported via zerolog.
 
-Output files are written alongside the source as `<name>.smelt<ext>` during
-transcoding, then renamed to `<name><ext>` (in-place) or left as
-`<name>.smelt<ext>` (default). Use `--output-dir` to redirect all output to a
-separate directory.
+During transcoding, output is written to a transient `<name>.transcoded<ext>`
+artifact (deleted on any failure). On success it is renamed to its final path:
+`<name><ext>` with `--inplace`, or `<name>.smelt<ext>` by default. Use
+`--output-dir` to redirect all output into a separate directory.
 
 ### Synopsis
 
