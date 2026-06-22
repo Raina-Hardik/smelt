@@ -19,6 +19,17 @@ type ProgressEvent struct {
 	Percent  float64 // 0.0–1.0; 0 if total is unknown
 }
 
+// EncodeSpec is the resolved input contract for one ffmpeg invocation. It is
+// built by the worker from a *config.Config (with any profile already merged),
+// keeping this package ignorant of config/viper. Grow this struct rather than
+// the Run signature when adding encode options.
+type EncodeSpec struct {
+	Codec     string   // alias (h264|h265|av1|vp9) or a raw encoder name
+	CRF       int      // constant rate factor
+	Preset    string   // encoder preset; ignored by codecs that don't take one
+	ExtraArgs []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
+}
+
 // ExecError means ffmpeg ran but exited non-zero.
 type ExecError struct {
 	FilePath string
@@ -41,12 +52,12 @@ func (e *OSError) Unwrap() error { return e.Err }
 
 var timeRe = regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
 
-// Run transcodes src → dst using codec, calling onProgress for each parsed
+// Run transcodes src → dst using spec, calling onProgress for each parsed
 // progress line. onProgress may be nil. ctx cancellation kills ffmpeg.
-func Run(ctx context.Context, src, dst, codec string, onProgress func(ProgressEvent)) error {
+func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(ProgressEvent)) error {
 	total, _ := probeDuration(ctx, src)
 
-	args := buildArgs(src, dst, codec)
+	args := buildArgs(src, dst, spec)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 
 	stderr, err := cmd.StderrPipe()
@@ -91,15 +102,30 @@ func Run(ctx context.Context, src, dst, codec string, onProgress func(ProgressEv
 	return nil
 }
 
-func buildArgs(src, dst, codec string) []string {
-	return []string{
-		"-hide_banner",
-		"-i", src,
-		"-c:v", codecFlag(codec),
-		"-c:a", "copy",
-		"-y",
-		dst,
+func buildArgs(src, dst string, spec EncodeSpec) []string {
+	args := []string{"-hide_banner", "-i", src}
+	args = append(args, rateControlArgs(spec)...)
+	args = append(args, "-c:a", "copy") // audio passthrough is out of scope for v1
+	args = append(args, spec.ExtraArgs...)
+	args = append(args, "-y", dst)
+	return args
+}
+
+// rateControlArgs builds the video-encoder flags. Rate control differs per
+// encoder: x264/x265/SVT-AV1 take -crf (+ -preset); libvpx-vp9 needs -b:v 0
+// alongside -crf and has no string preset.
+func rateControlArgs(spec EncodeSpec) []string {
+	enc := codecFlag(spec.Codec)
+	args := []string{"-c:v", enc, "-crf", strconv.Itoa(spec.CRF)}
+	switch enc {
+	case "libx264", "libx265", "libsvtav1":
+		if spec.Preset != "" {
+			args = append(args, "-preset", spec.Preset)
+		}
+	case "libvpx-vp9":
+		args = append(args, "-b:v", "0")
 	}
+	return args
 }
 
 func codecFlag(codec string) string {

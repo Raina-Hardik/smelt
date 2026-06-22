@@ -110,7 +110,12 @@ func (p *Pool) RunWithCallbacks(
 
 func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress func(ffmpeg.ProgressEvent)) error {
 	dst := OutputPath(f.Path)
-	if err := ffmpeg.Run(ctx, f.Path, dst, p.cfg.Codec, onProgress); err != nil {
+	spec := ffmpeg.EncodeSpec{
+		Codec:  p.cfg.Codec,
+		CRF:    p.cfg.CRF,
+		Preset: p.cfg.Preset,
+	}
+	if err := ffmpeg.Run(ctx, f.Path, dst, spec, onProgress); err != nil {
 		return err
 	}
 	if p.cfg.InPlace {
