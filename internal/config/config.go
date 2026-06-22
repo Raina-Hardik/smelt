@@ -29,7 +29,8 @@ type Config struct {
 	ExtraArgs []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
 
 	// CLI-only flags (not in config.yaml)
-	DryRun bool
+	DryRun    bool
+	AssumeYes bool // -y: skip destructive-action confirmation prompts
 }
 
 // Load reads the current viper state and returns a fully resolved Config.
@@ -63,7 +64,8 @@ func Load() *Config {
 		// Profile extra_args come first; CLI --ffmpeg-arg refine/append after.
 		ExtraArgs: append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
 
-		DryRun: viper.GetBool("transcode.dry_run"),
+		DryRun:    viper.GetBool("transcode.dry_run"),
+		AssumeYes: viper.GetBool("smelt.assume_yes"),
 	}
 }
 

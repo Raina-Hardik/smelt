@@ -55,9 +55,14 @@ func init() {
 		"log-format", "auto",
 		"log output format: auto|json|pretty",
 	)
+	rootCmd.PersistentFlags().BoolP(
+		"assume-yes", "y", false,
+		"skip confirmation prompts (assume yes) for destructive actions",
+	)
 
 	_ = viper.BindPFlag("smelt.log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("smelt.log_format", rootCmd.PersistentFlags().Lookup("log-format"))
+	_ = viper.BindPFlag("smelt.assume_yes", rootCmd.PersistentFlags().Lookup("assume-yes"))
 }
 
 func initLogger() {
