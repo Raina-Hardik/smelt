@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -26,7 +29,13 @@ in daemon and pipe mode.`,
 // Execute is the entry point called from main.go.
 func Execute() {
 	initLogger()
-	if err := rootCmd.Execute(); err != nil {
+
+	// Signal-aware context: SIGINT/SIGTERM cancels the context, which propagates
+	// down to in-flight ffmpeg children via exec.CommandContext.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }
