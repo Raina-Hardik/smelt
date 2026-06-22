@@ -140,6 +140,7 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		CRF:       p.cfg.CRF,
 		Preset:    p.cfg.Preset,
 		ExtraArgs: p.cfg.ExtraArgs,
+		Container: strings.TrimPrefix(filepath.Ext(dst), "."),
 	}
 	if err = ffmpeg.Run(ctx, f.Path, tmp, spec, onProgress); err != nil {
 		return err
@@ -188,24 +189,36 @@ func isOwnOutput(path, suffix string) bool {
 
 // transientPath is where ffmpeg writes while encoding. It sits in the final
 // destination's directory (named after the source) so the success rename stays
-// on one filesystem and never collides with the source or final files.
+// on one filesystem and never collides with the source or final files. Its
+// extension matches the destination so ffmpeg selects the right muxer.
 func transientPath(dst, src string) string {
-	ext := filepath.Ext(src)
-	base := strings.TrimSuffix(filepath.Base(src), ext)
-	return filepath.Join(filepath.Dir(dst), base+transientSuffix+ext)
+	base := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
+	return filepath.Join(filepath.Dir(dst), base+transientSuffix+filepath.Ext(dst))
 }
 
 // OutputPath returns the final destination for a finished transcode:
 //   - --inplace:     the original path (replaced)
 //   - --output-dir:  the source's relative path mirrored under that dir (original name)
 //   - otherwise:     <name><Suffix><ext> alongside the source (default .smelt)
+//
+// The extension is the --to container when set, else the source's.
 func OutputPath(f scanner.MediaFile, cfg *config.Config) string {
 	if cfg.InPlace {
 		return f.Path
 	}
+	ext := outExt(f.Path, cfg.Container)
 	if cfg.OutputDir != "" {
-		return filepath.Join(cfg.OutputDir, f.RelPath)
+		rel := strings.TrimSuffix(f.RelPath, filepath.Ext(f.RelPath)) + ext
+		return filepath.Join(cfg.OutputDir, rel)
 	}
-	ext := filepath.Ext(f.Path)
-	return strings.TrimSuffix(f.Path, ext) + cfg.Suffix + ext
+	return strings.TrimSuffix(f.Path, filepath.Ext(f.Path)) + cfg.Suffix + ext
+}
+
+// outExt returns the output extension: the target container (with a leading
+// dot) when set, otherwise the source file's extension.
+func outExt(src, container string) string {
+	if container != "" {
+		return "." + container
+	}
+	return filepath.Ext(src)
 }

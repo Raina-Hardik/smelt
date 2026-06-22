@@ -127,6 +127,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"filename suffix for outputs written alongside the source",
 	)
 	cmd.Flags().String(
+		"to", "",
+		"target container/format for outputs: mp4|mkv|webm|... (default: keep source container)",
+	)
+	cmd.Flags().String(
 		"profile", "",
 		"named profile preset from config; explicit flags still override it",
 	)
@@ -152,6 +156,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.force", "force"},
 		{"transcode.output_dir", "output-dir"},
 		{"transcode.suffix", "suffix"},
+		{"transcode.to", "to"},
 		{"transcode.profile", "profile"},
 		{"transcode.ffmpeg_args", "ffmpeg-arg"},
 		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent

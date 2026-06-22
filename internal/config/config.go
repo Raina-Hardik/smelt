@@ -25,7 +25,8 @@ type Config struct {
 	CRF       int
 	Preset    string
 	InPlace   bool
-	Force     bool // re-transcode even when the output already exists
+	Force     bool   // re-transcode even when the output already exists
+	Container string // --to: target container/format (e.g. mp4); empty keeps source
 	OutputDir string
 	Suffix    string
 	Profile   string
@@ -62,6 +63,7 @@ func Load() *Config {
 		Preset:    viper.GetString("transcode.preset"),
 		InPlace:   viper.GetBool("transcode.inplace"),
 		Force:     viper.GetBool("transcode.force"),
+		Container: strings.TrimPrefix(viper.GetString("transcode.to"), "."),
 		OutputDir: viper.GetString("transcode.output_dir"),
 		Suffix:    suffix,
 		Profile:   viper.GetString("transcode.profile"),
@@ -102,6 +104,9 @@ func applyProfile() []string {
 func (c *Config) Validate() error {
 	if c.InPlace && c.OutputDir != "" {
 		return errors.New("--inplace and --output-dir are mutually exclusive")
+	}
+	if c.InPlace && c.Container != "" {
+		return errors.New("--inplace and --to (container change) are mutually exclusive")
 	}
 	if c.Profile != "" && !viper.IsSet("profiles."+c.Profile) {
 		return fmt.Errorf("unknown profile %q", c.Profile)

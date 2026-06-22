@@ -28,6 +28,7 @@ type EncodeSpec struct {
 	Codec     string   // alias (h264|h265|av1|vp9) or a raw encoder name
 	CRF       int      // constant rate factor
 	Preset    string   // encoder preset; ignored by codecs that don't take one
+	Container string   // output container (e.g. mp4); drives container-specific muxer flags
 	ExtraArgs []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
 }
 
@@ -107,9 +108,25 @@ func buildArgs(src, dst string, spec EncodeSpec) []string {
 	args := []string{"-hide_banner", "-i", src}
 	args = append(args, rateControlArgs(spec)...)
 	args = append(args, "-c:a", "copy") // audio passthrough is out of scope for v1
+	args = append(args, containerArgs(spec)...)
 	args = append(args, spec.ExtraArgs...)
 	args = append(args, "-y", dst)
 	return args
+}
+
+// containerArgs adds muxer flags that make a container "just work". For mp4 it
+// enables faststart (web streaming) and tags HEVC as hvc1 for Apple compatibility.
+func containerArgs(spec EncodeSpec) []string {
+	switch strings.ToLower(spec.Container) {
+	case "mp4", "m4v", "mov":
+		args := []string{"-movflags", "+faststart"}
+		if codecFlag(spec.Codec) == "libx265" {
+			args = append(args, "-tag:v", "hvc1")
+		}
+		return args
+	default:
+		return nil
+	}
 }
 
 // rateControlArgs builds the video-encoder flags. Rate control differs per
