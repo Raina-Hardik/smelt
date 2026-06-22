@@ -108,12 +108,16 @@ Flags:
       --dry-run                  print transcode plan without executing anything
       --ext strings              file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray   raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+      --force                    re-transcode even if the output file already exists
   -h, --help                     help for transcode
+      --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
       --inplace                  replace original file after successful transcode
       --output-dir string        write output files to this directory instead of alongside source
       --preset string            ffmpeg encoding preset (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
       --src string               source directory to scan (default ".")
+      --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
+      --to string                target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
       --workers int              maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
@@ -132,11 +136,15 @@ Global Flags:
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
 | `--ext` | strings | `mkv,mp4,avi` | Comma-separated list of file extensions to match during the directory scan. Case-insensitive. Leading dots optional. |
 | `--ffmpeg-arg` | stringArray | _(none)_ | Raw ffmpeg argument passed through verbatim. Repeatable — one token per flag (e.g. `--ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2`). Profile `extra_args` are prepended before these. |
-| `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir`. |
+| `--force` | bool | `false` | Re-transcode even when the output already exists. Without it, re-runs are idempotent: existing outputs (and smelt's own `<suffix>` files) are skipped. Ignored for `--inplace`. |
+| `--hwaccel` | string | `auto` | Hardware acceleration backend: `auto`, `none`, `nvenc`, `qsv`, `vaapi`, `amf`, `videotoolbox`. `auto` functionally probes for a usable GPU encoder for the target codec and falls back to software; an explicit backend that isn't usable also falls back. The chosen encoder is logged. |
+| `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
 | `--preset` | string | `medium` | ffmpeg encoding preset. Faster presets trade quality for speed. Common values: `ultrafast`, `fast`, `medium`, `slow`, `veryslow`. Applied to x264/x265/SVT-AV1; ignored for VP9. |
 | `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
 | `--src` | string | `.` | Root directory to scan recursively for media files. |
+| `--suffix` | string | `.smelt` | Filename suffix for outputs written alongside the source (`<name><suffix><ext>`). Ignored for `--inplace` and `--output-dir`. |
+| `--to` | string | _(keep source)_ | Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags HEVC as `hvc1`. Mutually exclusive with `--inplace`. |
 | `--workers` | int | `0` | Maximum number of simultaneous ffmpeg processes. `0` means `runtime.NumCPU()`. |
 
 ---
@@ -168,12 +176,16 @@ Flags:
       --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
       --ext strings              file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray   raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+      --force                    re-transcode even if the output file already exists
   -h, --help                     help for tui
+      --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
       --inplace                  replace original file after successful transcode
       --output-dir string        write output files to this directory instead of alongside source
       --preset string            ffmpeg encoding preset (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
       --src string               source directory to scan (default ".")
+      --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
+      --to string                target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
       --workers int              maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
@@ -301,6 +313,10 @@ uppercase and underscores. Flag precedence (highest to lowest):
 | `--log-format` | `SMELT_LOG_FORMAT` |
 | `--src` | `SMELT_SRC` |
 | `--ext` | `SMELT_EXT` |
+| `--hwaccel` | `SMELT_HWACCEL` |
+| `--force` | `SMELT_FORCE` |
+| `--suffix` | `SMELT_SUFFIX` |
+| `--to` | `SMELT_TO` |
 | `--codec` | `SMELT_CODEC` |
 | `--crf` | `SMELT_CRF` |
 | `--preset` | `SMELT_PRESET` |
