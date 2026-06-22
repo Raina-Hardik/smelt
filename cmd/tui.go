@@ -3,10 +3,10 @@ package cmd
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 

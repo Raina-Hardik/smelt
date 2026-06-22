@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/worker"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ── message types ────────────────────────────────────────────────────────────
