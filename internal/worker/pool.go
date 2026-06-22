@@ -113,7 +113,12 @@ func (p *Pool) RunWithCallbacks(
 const transientSuffix = ".transcoded"
 
 func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress func(ffmpeg.ProgressEvent)) (err error) {
-	tmp := transientPath(f.Path)
+	dst := OutputPath(f, p.cfg)
+	if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+	}
+
+	tmp := transientPath(dst, f.Path)
 	// Delete the partial artifact on any failure, including context cancellation.
 	defer func() {
 		if err != nil {
@@ -130,25 +135,32 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		return err
 	}
 
-	dst := OutputPath(f.Path, p.cfg)
 	if err = os.Rename(tmp, dst); err != nil {
 		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
 	}
 	return nil
 }
 
-// transientPath is where ffmpeg writes while encoding: <name>.transcoded<ext>.
-func transientPath(src string) string {
+// transientPath is where ffmpeg writes while encoding. It sits in the final
+// destination's directory (named after the source) so the success rename stays
+// on one filesystem and never collides with the source or final files.
+func transientPath(dst, src string) string {
 	ext := filepath.Ext(src)
-	return strings.TrimSuffix(src, ext) + transientSuffix + ext
+	base := strings.TrimSuffix(filepath.Base(src), ext)
+	return filepath.Join(filepath.Dir(dst), base+transientSuffix+ext)
 }
 
 // OutputPath returns the final destination for a finished transcode:
-// the original path with --inplace, otherwise <name><Suffix><ext> (default .smelt).
-func OutputPath(src string, cfg *config.Config) string {
+//   - --inplace:     the original path (replaced)
+//   - --output-dir:  the source's relative path mirrored under that dir (original name)
+//   - otherwise:     <name><Suffix><ext> alongside the source (default .smelt)
+func OutputPath(f scanner.MediaFile, cfg *config.Config) string {
 	if cfg.InPlace {
-		return src
+		return f.Path
 	}
-	ext := filepath.Ext(src)
-	return strings.TrimSuffix(src, ext) + cfg.Suffix + ext
+	if cfg.OutputDir != "" {
+		return filepath.Join(cfg.OutputDir, f.RelPath)
+	}
+	ext := filepath.Ext(f.Path)
+	return strings.TrimSuffix(f.Path, ext) + cfg.Suffix + ext
 }

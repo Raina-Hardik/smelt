@@ -27,6 +27,9 @@ func init() {
 
 func runTUI(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 
 	files, err := scanner.Scan(cfg.Src, cfg.Ext)
 	if err != nil {

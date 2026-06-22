@@ -38,6 +38,9 @@ func init() {
 
 func runTranscode(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 
 	files, err := scanner.Scan(cfg.Src, cfg.Ext)
 	if err != nil {
@@ -52,7 +55,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		for _, f := range files {
 			log.Info().
 				Str("src", f.Path).
-				Str("dst", worker.OutputPath(f.Path, cfg)).
+				Str("dst", worker.OutputPath(f, cfg)).
 				Str("codec", cfg.Codec).
 				Int("crf", cfg.CRF).
 				Msg("plan")

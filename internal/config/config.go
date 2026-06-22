@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"runtime"
 
 	"github.com/spf13/viper"
@@ -58,4 +59,12 @@ func Load() *Config {
 
 		DryRun: viper.GetBool("transcode.dry_run"),
 	}
+}
+
+// Validate checks for mutually inconsistent configuration.
+func (c *Config) Validate() error {
+	if c.InPlace && c.OutputDir != "" {
+		return errors.New("--inplace and --output-dir are mutually exclusive")
+	}
+	return nil
 }
