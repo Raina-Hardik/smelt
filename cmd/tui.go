@@ -1,7 +1,12 @@
 package cmd
 
 import (
-	"github.com/rs/zerolog/log"
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/scanner"
+	"github.com/Raina-Hardik/smelt/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -16,10 +21,23 @@ Press q or Ctrl+C to quit; active jobs are cancelled cleanly.`,
 
 func init() {
 	addTranscodeFlags(tuiCmd)
+	tuiCmd.PreRunE = bindTranscodeFlags
 	rootCmd.AddCommand(tuiCmd)
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
-	log.Info().Str("cmd", "tui").Msg("not implemented")
-	return nil
+	cfg := config.Load()
+
+	files, err := scanner.Scan(cfg.Src, cfg.Ext)
+	if err != nil {
+		return fmt.Errorf("scan %s: %w", cfg.Src, err)
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)
+	}
+
+	model := tui.New(cfg, files, cmd.Context())
+	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(cmd.Context()))
+	_, err = prog.Run()
+	return err
 }
