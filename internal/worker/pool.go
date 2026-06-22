@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
@@ -29,6 +30,7 @@ func New(cfg *config.Config) *Pool {
 
 // Run transcodes all files, logging results via zerolog. Blocks until done.
 func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
+	start := time.Now()
 	results := make(chan error, len(files))
 	var wg sync.WaitGroup
 
@@ -71,6 +73,13 @@ func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 			errCount++
 		}
 	}
+
+	log.Info().
+		Int("ok", len(files)-errCount).
+		Int("failed", errCount).
+		Dur("elapsed", time.Since(start)).
+		Msg("transcode complete")
+
 	if errCount > 0 {
 		return fmt.Errorf("%d file(s) failed to transcode", errCount)
 	}
