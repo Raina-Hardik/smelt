@@ -2,7 +2,8 @@
 # Mirrors the commands documented in CLAUDE.md.
 
 # Inject version into the `cmd` package (NOT main — `version` lives in cmd/version.go).
-version := "v0.2.0-dev"
+# Derived from git: exact tag at HEAD, else <tag>-<n>-g<sha>[-dirty], else "dev".
+version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
 ldflags := "-X github.com/Raina-Hardik/smelt/cmd.version=" + version
 
 _default:
