@@ -1,0 +1,16 @@
+version: "2"
+
+run:
+  build-tags:
+    - integration
+
+linters:
+  # The default set (errcheck, govet, ineffassign, staticcheck, unused) plus:
+  enable:
+    - misspell
+    - unconvert
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
