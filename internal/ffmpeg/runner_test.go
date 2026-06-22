@@ -41,6 +41,12 @@ func TestRateControlArgs(t *testing.T) {
 			[]string{"-c:v", "libvpx-vp9", "-crf", "31", "-b:v", "0"}},
 		{"empty preset omits flag", EncodeSpec{Codec: "h264", CRF: 20},
 			[]string{"-c:v", "libx264", "-crf", "20"}},
+		{"nvenc uses -cq", EncodeSpec{Encoder: "hevc_nvenc", Backend: "nvenc", CRF: 23, Preset: "p5"},
+			[]string{"-c:v", "hevc_nvenc", "-rc", "vbr", "-cq", "23", "-preset", "p5"}},
+		{"qsv uses -global_quality", EncodeSpec{Encoder: "h264_qsv", Backend: "qsv", CRF: 25},
+			[]string{"-c:v", "h264_qsv", "-global_quality", "25"}},
+		{"vaapi uses -qp", EncodeSpec{Encoder: "hevc_vaapi", Backend: "vaapi", CRF: 24},
+			[]string{"-c:v", "hevc_vaapi", "-rc_mode", "CQP", "-qp", "24"}},
 	}
 	for _, c := range cases {
 		if got := rateControlArgs(c.spec); !reflect.DeepEqual(got, c.want) {
@@ -66,6 +72,25 @@ func TestBuildArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("buildArgs =\n  %v\nwant\n  %v", got, want)
+	}
+}
+
+// VAAPI requires the device selected before -i and a hwupload filter after it.
+func TestVAAPIPipelineOrder(t *testing.T) {
+	got := buildArgs("in.mkv", "out.mkv", EncodeSpec{Encoder: "hevc_vaapi", Backend: "vaapi", CRF: 24})
+	dev, in, vf := -1, -1, -1
+	for i, a := range got {
+		switch a {
+		case "-vaapi_device":
+			dev = i
+		case "-i":
+			in = i
+		case "-vf":
+			vf = i
+		}
+	}
+	if dev < 0 || in < 0 || vf < 0 || dev >= in || in >= vf {
+		t.Errorf("vaapi arg order wrong (device=%d input=%d filter=%d): %v", dev, in, vf, got)
 	}
 }
 
