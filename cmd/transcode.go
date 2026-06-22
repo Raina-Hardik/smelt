@@ -105,6 +105,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"profile", "",
 		"named profile from config; overrides --codec, --crf, --preset",
 	)
+	cmd.Flags().StringArray(
+		"ffmpeg-arg", nil,
+		"raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)",
+	)
 }
 
 // bindTranscodeFlags binds the invoked command's flags to viper at run time.
@@ -122,6 +126,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.inplace", "inplace"},
 		{"transcode.output_dir", "output-dir"},
 		{"transcode.profile", "profile"},
+		{"transcode.ffmpeg_args", "ffmpeg-arg"},
 		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent
 	}
 	for _, b := range binds {

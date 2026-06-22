@@ -25,6 +25,7 @@ type Config struct {
 	OutputDir string
 	Suffix    string
 	Profile   string
+	ExtraArgs []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
 
 	// CLI-only flags (not in config.yaml)
 	DryRun bool
@@ -56,6 +57,7 @@ func Load() *Config {
 		OutputDir: viper.GetString("transcode.output_dir"),
 		Suffix:    suffix,
 		Profile:   viper.GetString("transcode.profile"),
+		ExtraArgs: viper.GetStringSlice("transcode.ffmpeg_args"),
 
 		DryRun: viper.GetBool("transcode.dry_run"),
 	}
