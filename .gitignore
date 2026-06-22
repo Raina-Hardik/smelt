@@ -1,1 +1,4 @@
 .scratch/
+
+# built binary
+/smelt
