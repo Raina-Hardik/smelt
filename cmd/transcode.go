@@ -51,6 +51,13 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if ok, err := confirmInplace(cfg, len(files)); err != nil {
+		return err
+	} else if !ok {
+		log.Info().Msg("aborted")
+		return nil
+	}
+
 	if cfg.DryRun {
 		for _, f := range files {
 			log.Info().

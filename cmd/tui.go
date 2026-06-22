@@ -39,6 +39,13 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)
 	}
 
+	// Confirm the destructive --inplace path before taking over the screen.
+	if ok, err := confirmInplace(cfg, len(files)); err != nil {
+		return err
+	} else if !ok {
+		return nil
+	}
+
 	model := tui.New(cfg, files, cmd.Context())
 	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(cmd.Context()))
 	_, err = prog.Run()
