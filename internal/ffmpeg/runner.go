@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -128,19 +129,37 @@ func rateControlArgs(spec EncodeSpec) []string {
 	return args
 }
 
+// codecAliases maps user-facing codec names to ffmpeg software encoders.
+var codecAliases = map[string]string{
+	"h265": "libx265",
+	"hevc": "libx265",
+	"h264": "libx264",
+	"avc":  "libx264",
+	"av1":  "libsvtav1",
+	"vp9":  "libvpx-vp9",
+}
+
 func codecFlag(codec string) string {
-	switch strings.ToLower(codec) {
-	case "h265", "hevc":
-		return "libx265"
-	case "h264", "avc":
-		return "libx264"
-	case "av1":
-		return "libsvtav1"
-	case "vp9":
-		return "libvpx-vp9"
-	default:
-		return codec
+	if enc, ok := codecAliases[strings.ToLower(codec)]; ok {
+		return enc
 	}
+	return codec // passthrough for raw encoder names
+}
+
+// IsKnownCodec reports whether codec is a recognized alias.
+func IsKnownCodec(codec string) bool {
+	_, ok := codecAliases[strings.ToLower(codec)]
+	return ok
+}
+
+// KnownCodecs returns the recognized codec aliases, sorted.
+func KnownCodecs() []string {
+	out := make([]string, 0, len(codecAliases))
+	for k := range codecAliases {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func parseTime(line string) (time.Duration, bool) {
