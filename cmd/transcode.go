@@ -123,6 +123,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"write output files to this directory instead of alongside source",
 	)
 	cmd.Flags().String(
+		"suffix", ".smelt",
+		"filename suffix for outputs written alongside the source",
+	)
+	cmd.Flags().String(
 		"profile", "",
 		"named profile preset from config; explicit flags still override it",
 	)
@@ -147,6 +151,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.inplace", "inplace"},
 		{"transcode.force", "force"},
 		{"transcode.output_dir", "output-dir"},
+		{"transcode.suffix", "suffix"},
 		{"transcode.profile", "profile"},
 		{"transcode.ffmpeg_args", "ffmpeg-arg"},
 		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent
