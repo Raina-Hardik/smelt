@@ -64,6 +64,10 @@ testdata:
            -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
            -c:v libx264 -crf 23 -t 30 testdata/sample.mp4
 
+# Spawn a clean real-media testing env in ./smelt-sample-testcase/ (installs gum if needed).
+sample-env:
+    bash scripts/build-smelt-dataset.sh
+
 # Remove build artifacts.
 clean:
     rm -f smelt
