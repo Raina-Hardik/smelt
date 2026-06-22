@@ -5,3 +5,6 @@
 
 # integration-test media corpus (built by .scratch/build-smelt-dataset.sh)
 smelt-testdata/
+
+# real-media testing env (built by scripts/build-smelt-dataset.sh)
+smelt-sample-testcase/
