@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 
+	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/spf13/viper"
 )
 
@@ -103,6 +105,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Profile != "" && !viper.IsSet("profiles."+c.Profile) {
 		return fmt.Errorf("unknown profile %q", c.Profile)
+	}
+	if !ffmpeg.IsKnownCodec(c.Codec) {
+		return fmt.Errorf("unknown codec %q; valid: %s", c.Codec, strings.Join(ffmpeg.KnownCodecs(), ", "))
+	}
+	if c.CRF < 0 || c.CRF > 51 {
+		return fmt.Errorf("--crf %d out of range (0-51)", c.CRF)
 	}
 	return nil
 }

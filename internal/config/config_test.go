@@ -69,9 +69,22 @@ func TestValidateRejectsUnknownProfile(t *testing.T) {
 
 	viper.Reset()
 	setWebProfile()
-	known := &Config{Profile: "web"}
+	known := &Config{Profile: "web", Codec: "h265"}
 	if err := known.Validate(); err != nil {
 		t.Errorf("known profile should validate: %v", err)
+	}
+}
+
+func TestValidateRejectsBadCodecAndCRF(t *testing.T) {
+	viper.Reset()
+	if err := (&Config{Codec: "h256"}).Validate(); err == nil {
+		t.Error("expected unknown codec h256 to be rejected")
+	}
+	if err := (&Config{Codec: "h265", CRF: 60}).Validate(); err == nil {
+		t.Error("expected --crf 60 to be rejected")
+	}
+	if err := (&Config{Codec: "h265", CRF: 23}).Validate(); err != nil {
+		t.Errorf("valid config should pass: %v", err)
 	}
 }
 
