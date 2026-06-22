@@ -39,6 +39,15 @@ lint:
 # Build, vet, and race-test — the pre-PR gate.
 check: build vet test-race
 
+# Full CI gate: everything in `check` plus lint.
+ci: check lint
+
+# Tag and push a release. Refuses unless the full CI gate (incl. lint) passes.
+# Usage: just tag v0.1.0
+tag VERSION: ci
+    git tag -a {{VERSION}} -m "Release {{VERSION}}"
+    git push origin {{VERSION}}
+
 # Run transcode against testdata without building.
 run-transcode *ARGS:
     go run . transcode --src ./testdata {{ARGS}}
