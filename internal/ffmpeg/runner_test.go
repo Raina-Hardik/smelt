@@ -69,6 +69,25 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
+func TestContainerArgs(t *testing.T) {
+	// mp4 + hevc → faststart + hvc1 tag
+	got := containerArgs(EncodeSpec{Codec: "h265", Container: "mp4"})
+	want := []string{"-movflags", "+faststart", "-tag:v", "hvc1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mp4+hevc container args = %v, want %v", got, want)
+	}
+	// mp4 + h264 → faststart only, no hvc1
+	got = containerArgs(EncodeSpec{Codec: "h264", Container: "mp4"})
+	want = []string{"-movflags", "+faststart"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mp4+h264 container args = %v, want %v", got, want)
+	}
+	// mkv → no special muxer flags
+	if got := containerArgs(EncodeSpec{Codec: "h265", Container: "mkv"}); got != nil {
+		t.Errorf("mkv container args = %v, want nil", got)
+	}
+}
+
 func TestParseTime(t *testing.T) {
 	d, ok := parseTime("frame=  120 fps= 24 time=00:01:23.45 bitrate=1000kbits/s")
 	if !ok {

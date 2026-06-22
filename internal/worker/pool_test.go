@@ -24,6 +24,12 @@ func TestOutputPath(t *testing.T) {
 		{"output-dir mirrors rel tree, keeps name",
 			scanner.MediaFile{Path: "/media/movies/a.mkv", RelPath: "movies/a.mkv"},
 			&config.Config{Suffix: ".smelt", OutputDir: "/out"}, "/out/movies/a.mkv"},
+		{"--to swaps container ext",
+			scanner.MediaFile{Path: "/media/a.mkv"},
+			&config.Config{Suffix: ".smelt", Container: "mp4"}, "/media/a.smelt.mp4"},
+		{"--to with output-dir swaps ext in mirrored tree",
+			scanner.MediaFile{Path: "/media/movies/a.mkv", RelPath: "movies/a.mkv"},
+			&config.Config{Suffix: ".smelt", OutputDir: "/out", Container: "mp4"}, "/out/movies/a.mp4"},
 	}
 	for _, c := range cases {
 		if got := OutputPath(c.file, c.cfg); got != c.want {
