@@ -2,3 +2,6 @@
 
 # built binary
 /smelt
+
+# integration-test media corpus (built by .scratch/build-smelt-dataset.sh)
+smelt-testdata/
