@@ -52,6 +52,15 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	files, skipped := worker.Plan(files, cfg)
+	if skipped > 0 {
+		log.Info().Int("skipped", skipped).Msg("skipped existing outputs (use --force to re-transcode)")
+	}
+	if len(files) == 0 {
+		log.Info().Msg("nothing to transcode; all outputs already exist")
+		return nil
+	}
+
 	if ok, err := confirmInplace(cfg, len(files)); err != nil {
 		return err
 	} else if !ok {
@@ -105,6 +114,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"inplace", false,
 		"replace original file after successful transcode",
 	)
+	cmd.Flags().Bool(
+		"force", false,
+		"re-transcode even if the output file already exists",
+	)
 	cmd.Flags().String(
 		"output-dir", "",
 		"write output files to this directory instead of alongside source",
@@ -132,6 +145,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.preset", "preset"},
 		{"smelt.workers", "workers"},
 		{"transcode.inplace", "inplace"},
+		{"transcode.force", "force"},
 		{"transcode.output_dir", "output-dir"},
 		{"transcode.profile", "profile"},
 		{"transcode.ffmpeg_args", "ffmpeg-arg"},

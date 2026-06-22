@@ -23,6 +23,7 @@ type Config struct {
 	CRF       int
 	Preset    string
 	InPlace   bool
+	Force     bool // re-transcode even when the output already exists
 	OutputDir string
 	Suffix    string
 	Profile   string
@@ -58,6 +59,7 @@ func Load() *Config {
 		CRF:       viper.GetInt("transcode.crf"),
 		Preset:    viper.GetString("transcode.preset"),
 		InPlace:   viper.GetBool("transcode.inplace"),
+		Force:     viper.GetBool("transcode.force"),
 		OutputDir: viper.GetString("transcode.output_dir"),
 		Suffix:    suffix,
 		Profile:   viper.GetString("transcode.profile"),

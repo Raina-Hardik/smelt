@@ -6,6 +6,7 @@ import (
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/tui"
+	"github.com/Raina-Hardik/smelt/internal/worker"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +38,11 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	}
 	if len(files) == 0 {
 		return fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)
+	}
+
+	files, _ = worker.Plan(files, cfg)
+	if len(files) == 0 {
+		return fmt.Errorf("nothing to transcode; all outputs already exist (use --force)")
 	}
 
 	// Confirm the destructive --inplace path before taking over the screen.

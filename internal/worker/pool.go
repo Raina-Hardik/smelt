@@ -151,6 +151,41 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	return nil
 }
 
+// Plan filters a scanned file list down to what actually needs transcoding,
+// making non-inplace re-runs idempotent. It drops (a) our own previously
+// generated outputs (`*<suffix><ext>`) and (b) sources whose output already
+// exists, unless cfg.Force is set. In-place mode is returned unchanged —
+// idempotency there would require codec probing and is out of scope.
+func Plan(files []scanner.MediaFile, cfg *config.Config) (todo []scanner.MediaFile, skipped int) {
+	if cfg.InPlace {
+		return files, 0
+	}
+	for _, f := range files {
+		if isOwnOutput(f.Path, cfg.Suffix) {
+			skipped++
+			continue
+		}
+		if !cfg.Force {
+			if _, err := os.Stat(OutputPath(f, cfg)); err == nil {
+				skipped++
+				continue
+			}
+		}
+		todo = append(todo, f)
+	}
+	return todo, skipped
+}
+
+// isOwnOutput reports whether path looks like a file smelt itself produced,
+// i.e. its name stem ends with the output suffix (e.g. "movie.smelt.mkv").
+func isOwnOutput(path, suffix string) bool {
+	if suffix == "" {
+		return false
+	}
+	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return strings.HasSuffix(stem, suffix)
+}
+
 // transientPath is where ffmpeg writes while encoding. It sits in the final
 // destination's directory (named after the source) so the success rename stays
 // on one filesystem and never collides with the source or final files.
