@@ -43,6 +43,47 @@ func TestTransientPath(t *testing.T) {
 	}
 }
 
+func TestPlanExcludesOwnOutputsAndExisting(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.mkv")
+	own := filepath.Join(dir, "b.smelt.mkv") // a previously generated output
+	fresh := filepath.Join(dir, "c.mkv")
+	for _, p := range []string{src, fresh, own, filepath.Join(dir, "a.smelt.mkv")} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{Suffix: ".smelt"}
+	files := []scanner.MediaFile{{Path: src}, {Path: own}, {Path: fresh}}
+	todo, skipped := Plan(files, cfg)
+
+	// a.mkv skipped (a.smelt.mkv exists), b.smelt.mkv skipped (own output), c.mkv kept.
+	if skipped != 2 || len(todo) != 1 || todo[0].Path != fresh {
+		t.Fatalf("Plan = (todo %v, skipped %d), want ([c.mkv], 2)", todo, skipped)
+	}
+}
+
+func TestPlanForceKeepsExisting(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.mkv")
+	if err := os.WriteFile(filepath.Join(dir, "a.smelt.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	todo, skipped := Plan([]scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true})
+	if skipped != 0 || len(todo) != 1 {
+		t.Errorf("with --force: (todo %d, skipped %d), want (1, 0)", len(todo), skipped)
+	}
+}
+
+func TestPlanInplacePassesThrough(t *testing.T) {
+	files := []scanner.MediaFile{{Path: "/x/a.mkv"}, {Path: "/x/b.smelt.mkv"}}
+	todo, skipped := Plan(files, &config.Config{Suffix: ".smelt", InPlace: true})
+	if skipped != 0 || len(todo) != 2 {
+		t.Errorf("inplace passthrough: (todo %d, skipped %d), want (2, 0)", len(todo), skipped)
+	}
+}
+
 // A failed encode must leave no partial artifact behind. ffmpeg is invoked on a
 // non-existent source so Run fails fast without needing real media.
 func TestTranscodeCleansUpOnFailure(t *testing.T) {
