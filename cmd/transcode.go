@@ -110,7 +110,7 @@ func addTranscodeFlags(cmd *cobra.Command) {
 	)
 	cmd.Flags().String(
 		"profile", "",
-		"named profile from config; overrides --codec, --crf, --preset",
+		"named profile preset from config; explicit flags still override it",
 	)
 	cmd.Flags().StringArray(
 		"ffmpeg-arg", nil,

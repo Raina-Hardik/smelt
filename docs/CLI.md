@@ -10,6 +10,7 @@ These flags are accepted by every command.
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `-y`, `--assume-yes` | bool | `false` | Skip confirmation prompts (assume yes) for destructive actions such as `--inplace`. |
 | `--config` | string | _(auto-search)_ | Path to config file. Searches `./config.yaml` then `$HOME/.config/smelt/config.yaml` when empty. |
 | `--log-format` | string | `auto` | Log output format: `auto` \| `json` \| `pretty`. `auto` selects `pretty` when stdout is a TTY, `json` otherwise. |
 | `--log-level` | string | `info` | Log verbosity: `debug` \| `info` \| `warn` \| `error`. |
@@ -37,6 +38,7 @@ Available Commands:
   version     Print smelt version information
 
 Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
   -h, --help                help for smelt
       --log-format string   log output format: auto|json|pretty (default "auto")
@@ -101,19 +103,21 @@ Examples:
   smelt transcode --src /mnt/media --output-dir /mnt/transcoded
 
 Flags:
-      --codec string        target video codec: h264|h265|av1|vp9 (default "h265")
-      --crf int             constant rate factor 0-51; lower = higher quality (default 23)
-      --dry-run             print transcode plan without executing anything
-      --ext strings         file extensions to match (default [mkv,mp4,avi])
-  -h, --help                help for transcode
-      --inplace             replace original file after successful transcode
-      --output-dir string   write output files to this directory instead of alongside source
-      --preset string       ffmpeg encoding preset (default "medium")
-      --profile string      named profile from config; overrides --codec, --crf, --preset
-      --src string          source directory to scan (default ".")
-      --workers int         maximum parallel transcode jobs; 0 = runtime.NumCPU() (default 0)
+      --codec string             target video codec: h264|h265|av1|vp9 (default "h265")
+      --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
+      --dry-run                  print transcode plan without executing anything
+      --ext strings              file extensions to match (default [mkv,mp4,avi])
+      --ffmpeg-arg stringArray   raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+  -h, --help                     help for transcode
+      --inplace                  replace original file after successful transcode
+      --output-dir string        write output files to this directory instead of alongside source
+      --preset string            ffmpeg encoding preset (default "medium")
+      --profile string           named profile preset from config; explicit flags still override it
+      --src string               source directory to scan (default ".")
+      --workers int              maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -127,10 +131,11 @@ Global Flags:
 | `--crf` | int | `23` | Constant Rate Factor controlling quality vs. file size. Lower values produce higher quality. Valid range: 0–51. |
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
 | `--ext` | strings | `mkv,mp4,avi` | Comma-separated list of file extensions to match during the directory scan. Case-insensitive. Leading dots optional. |
-| `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. The original is unrecoverable after this operation. |
-| `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, preserving the relative path structure from `--src`. Directory must exist. |
-| `--preset` | string | `medium` | ffmpeg encoding preset. Faster presets trade quality for speed. Common values: `ultrafast`, `fast`, `medium`, `slow`, `veryslow`. |
-| `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. When set, overrides `--codec`, `--crf`, and `--preset`. |
+| `--ffmpeg-arg` | stringArray | _(none)_ | Raw ffmpeg argument passed through verbatim. Repeatable — one token per flag (e.g. `--ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2`). Profile `extra_args` are prepended before these. |
+| `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir`. |
+| `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
+| `--preset` | string | `medium` | ffmpeg encoding preset. Faster presets trade quality for speed. Common values: `ultrafast`, `fast`, `medium`, `slow`, `veryslow`. Applied to x264/x265/SVT-AV1; ignored for VP9. |
+| `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
 | `--src` | string | `.` | Root directory to scan recursively for media files. |
 | `--workers` | int | `0` | Maximum number of simultaneous ffmpeg processes. `0` means `runtime.NumCPU()`. |
 
@@ -159,18 +164,20 @@ Usage:
   smelt tui [flags]
 
 Flags:
-      --codec string        target video codec: h264|h265|av1|vp9 (default "h265")
-      --crf int             constant rate factor 0-51; lower = higher quality (default 23)
-      --ext strings         file extensions to match (default [mkv,mp4,avi])
-  -h, --help                help for tui
-      --inplace             replace original file after successful transcode
-      --output-dir string   write output files to this directory instead of alongside source
-      --preset string       ffmpeg encoding preset (default "medium")
-      --profile string      named profile from config; overrides --codec, --crf, --preset
-      --src string          source directory to scan (default ".")
-      --workers int         maximum parallel transcode jobs; 0 = runtime.NumCPU() (default 0)
+      --codec string             target video codec: h264|h265|av1|vp9 (default "h265")
+      --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
+      --ext strings              file extensions to match (default [mkv,mp4,avi])
+      --ffmpeg-arg stringArray   raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+  -h, --help                     help for tui
+      --inplace                  replace original file after successful transcode
+      --output-dir string        write output files to this directory instead of alongside source
+      --preset string            ffmpeg encoding preset (default "medium")
+      --profile string           named profile preset from config; explicit flags still override it
+      --src string               source directory to scan (default ".")
+      --workers int              maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -289,6 +296,7 @@ uppercase and underscores. Flag precedence (highest to lowest):
 
 | Flag | Env var |
 |---|---|
+| `--assume-yes` | `SMELT_ASSUME_YES` |
 | `--log-level` | `SMELT_LOG_LEVEL` |
 | `--log-format` | `SMELT_LOG_FORMAT` |
 | `--src` | `SMELT_SRC` |
