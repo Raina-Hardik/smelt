@@ -52,7 +52,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		for _, f := range files {
 			log.Info().
 				Str("src", f.Path).
-				Str("dst", worker.OutputPath(f.Path)).
+				Str("dst", worker.OutputPath(f.Path, cfg)).
 				Str("codec", cfg.Codec).
 				Int("crf", cfg.CRF).
 				Msg("plan")

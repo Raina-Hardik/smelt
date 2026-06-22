@@ -108,26 +108,47 @@ func (p *Pool) RunWithCallbacks(
 	wg.Wait()
 }
 
-func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress func(ffmpeg.ProgressEvent)) error {
-	dst := OutputPath(f.Path)
+// transientSuffix names the in-progress artifact ffmpeg writes to. It never
+// survives a run: renamed to the final path on success, deleted on any failure.
+const transientSuffix = ".transcoded"
+
+func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress func(ffmpeg.ProgressEvent)) (err error) {
+	tmp := transientPath(f.Path)
+	// Delete the partial artifact on any failure, including context cancellation.
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmp)
+		}
+	}()
+
 	spec := ffmpeg.EncodeSpec{
 		Codec:  p.cfg.Codec,
 		CRF:    p.cfg.CRF,
 		Preset: p.cfg.Preset,
 	}
-	if err := ffmpeg.Run(ctx, f.Path, dst, spec, onProgress); err != nil {
+	if err = ffmpeg.Run(ctx, f.Path, tmp, spec, onProgress); err != nil {
 		return err
 	}
-	if p.cfg.InPlace {
-		if err := os.Rename(dst, f.Path); err != nil {
-			return fmt.Errorf("inplace rename: %w", err)
-		}
+
+	dst := OutputPath(f.Path, p.cfg)
+	if err = os.Rename(tmp, dst); err != nil {
+		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
 	}
 	return nil
 }
 
-// OutputPath returns the default output path for a given source file.
-func OutputPath(src string) string {
+// transientPath is where ffmpeg writes while encoding: <name>.transcoded<ext>.
+func transientPath(src string) string {
 	ext := filepath.Ext(src)
-	return strings.TrimSuffix(src, ext) + ".transcoded" + ext
+	return strings.TrimSuffix(src, ext) + transientSuffix + ext
+}
+
+// OutputPath returns the final destination for a finished transcode:
+// the original path with --inplace, otherwise <name><Suffix><ext> (default .smelt).
+func OutputPath(src string, cfg *config.Config) string {
+	if cfg.InPlace {
+		return src
+	}
+	ext := filepath.Ext(src)
+	return strings.TrimSuffix(src, ext) + cfg.Suffix + ext
 }
