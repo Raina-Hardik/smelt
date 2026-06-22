@@ -106,6 +106,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"preset", "medium",
 		"ffmpeg encoding preset",
 	)
+	cmd.Flags().String(
+		"hwaccel", "auto",
+		"hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox",
+	)
 	cmd.Flags().Int(
 		"workers", 0,
 		"maximum parallel transcode jobs; 0 = runtime.NumCPU()",
@@ -151,6 +155,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.codec", "codec"},
 		{"transcode.crf", "crf"},
 		{"transcode.preset", "preset"},
+		{"transcode.hwaccel", "hwaccel"},
 		{"smelt.workers", "workers"},
 		{"transcode.inplace", "inplace"},
 		{"transcode.force", "force"},

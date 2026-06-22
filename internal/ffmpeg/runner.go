@@ -29,6 +29,8 @@ type EncodeSpec struct {
 	CRF       int      // constant rate factor
 	Preset    string   // encoder preset; ignored by codecs that don't take one
 	Container string   // output container (e.g. mp4); drives container-specific muxer flags
+	Encoder   string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
+	Backend   string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
 	ExtraArgs []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
 }
 
@@ -105,13 +107,40 @@ func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(
 }
 
 func buildArgs(src, dst string, spec EncodeSpec) []string {
-	args := []string{"-hide_banner", "-i", src}
+	args := []string{"-hide_banner"}
+	args = append(args, preInputArgs(spec)...)
+	args = append(args, "-i", src)
+	args = append(args, videoFilterArgs(spec)...)
 	args = append(args, rateControlArgs(spec)...)
 	args = append(args, "-c:a", "copy") // audio passthrough is out of scope for v1
 	args = append(args, containerArgs(spec)...)
 	args = append(args, spec.ExtraArgs...)
 	args = append(args, "-y", dst)
 	return args
+}
+
+// videoEncoder returns the resolved encoder, or the software encoder for the codec.
+func videoEncoder(spec EncodeSpec) string {
+	if spec.Encoder != "" {
+		return spec.Encoder
+	}
+	return codecFlag(spec.Codec)
+}
+
+// preInputArgs are flags that must precede -i (e.g. selecting the VAAPI device).
+func preInputArgs(spec EncodeSpec) []string {
+	if spec.Backend == "vaapi" {
+		return []string{"-vaapi_device", vaapiDevice()}
+	}
+	return nil
+}
+
+// videoFilterArgs uploads frames to GPU memory where the backend requires it.
+func videoFilterArgs(spec EncodeSpec) []string {
+	if spec.Backend == "vaapi" {
+		return []string{"-vf", "format=nv12,hwupload"}
+	}
+	return nil
 }
 
 // containerArgs adds muxer flags that make a container "just work". For mp4 it
@@ -133,15 +162,34 @@ func containerArgs(spec EncodeSpec) []string {
 // encoder: x264/x265/SVT-AV1 take -crf (+ -preset); libvpx-vp9 needs -b:v 0
 // alongside -crf and has no string preset.
 func rateControlArgs(spec EncodeSpec) []string {
-	enc := codecFlag(spec.Codec)
-	args := []string{"-c:v", enc, "-crf", strconv.Itoa(spec.CRF)}
-	switch enc {
-	case "libx264", "libx265", "libsvtav1":
+	args := []string{"-c:v", videoEncoder(spec)}
+	switch spec.Backend {
+	case "nvenc":
+		args = append(args, "-rc", "vbr", "-cq", strconv.Itoa(spec.CRF))
 		if spec.Preset != "" {
 			args = append(args, "-preset", spec.Preset)
 		}
-	case "libvpx-vp9":
-		args = append(args, "-b:v", "0")
+	case "qsv":
+		args = append(args, "-global_quality", strconv.Itoa(spec.CRF))
+		if spec.Preset != "" {
+			args = append(args, "-preset", spec.Preset)
+		}
+	case "vaapi":
+		args = append(args, "-rc_mode", "CQP", "-qp", strconv.Itoa(spec.CRF))
+	case "amf":
+		args = append(args, "-rc", "cqp", "-qp_i", strconv.Itoa(spec.CRF), "-qp_p", strconv.Itoa(spec.CRF))
+	case "videotoolbox":
+		args = append(args, "-q:v", strconv.Itoa(spec.CRF))
+	default: // software
+		args = append(args, "-crf", strconv.Itoa(spec.CRF))
+		switch videoEncoder(spec) {
+		case "libx264", "libx265", "libsvtav1":
+			if spec.Preset != "" {
+				args = append(args, "-preset", spec.Preset)
+			}
+		case "libvpx-vp9":
+			args = append(args, "-b:v", "0")
+		}
 	}
 	return args
 }

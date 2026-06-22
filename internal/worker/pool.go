@@ -17,8 +17,10 @@ import (
 )
 
 type Pool struct {
-	cfg *config.Config
-	sem *semaphore.Weighted
+	cfg     *config.Config
+	sem     *semaphore.Weighted
+	encoder string // resolved once per run via resolveEncoder
+	backend string
 }
 
 func New(cfg *config.Config) *Pool {
@@ -28,9 +30,21 @@ func New(cfg *config.Config) *Pool {
 	}
 }
 
+// resolveEncoder probes for the hardware encoder once (it spawns ffmpeg) and
+// records the choice for all files in this run.
+func (p *Pool) resolveEncoder(ctx context.Context) {
+	p.encoder, p.backend = ffmpeg.ResolveEncoder(ctx, p.cfg.Codec, p.cfg.HWAccel)
+	log.Info().
+		Str("codec", p.cfg.Codec).
+		Str("hwaccel", p.cfg.HWAccel).
+		Str("encoder", p.encoder).
+		Msg("encoder selected")
+}
+
 // Run transcodes all files, logging results via zerolog. Blocks until done.
 func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 	start := time.Now()
+	p.resolveEncoder(ctx)
 	results := make(chan error, len(files))
 	var wg sync.WaitGroup
 
@@ -94,6 +108,7 @@ func (p *Pool) RunWithCallbacks(
 	onProgress func(ffmpeg.ProgressEvent),
 	onComplete func(scanner.MediaFile, error),
 ) {
+	p.resolveEncoder(ctx)
 	var wg sync.WaitGroup
 	for _, f := range files {
 		f := f
@@ -141,6 +156,8 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		Preset:    p.cfg.Preset,
 		ExtraArgs: p.cfg.ExtraArgs,
 		Container: strings.TrimPrefix(filepath.Ext(dst), "."),
+		Encoder:   p.encoder,
+		Backend:   p.backend,
 	}
 	if err = ffmpeg.Run(ctx, f.Path, tmp, spec, onProgress); err != nil {
 		return err

@@ -24,6 +24,7 @@ type Config struct {
 	Codec     string
 	CRF       int
 	Preset    string
+	HWAccel   string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
 	InPlace   bool
 	Force     bool   // re-transcode even when the output already exists
 	Container string // --to: target container/format (e.g. mp4); empty keeps source
@@ -51,6 +52,11 @@ func Load() *Config {
 		suffix = ".smelt"
 	}
 
+	hwaccel := viper.GetString("transcode.hwaccel")
+	if hwaccel == "" {
+		hwaccel = "auto"
+	}
+
 	return &Config{
 		Workers:   workers,
 		LogLevel:  viper.GetString("smelt.log_level"),
@@ -61,6 +67,7 @@ func Load() *Config {
 		Codec:     viper.GetString("transcode.codec"),
 		CRF:       viper.GetInt("transcode.crf"),
 		Preset:    viper.GetString("transcode.preset"),
+		HWAccel:   hwaccel,
 		InPlace:   viper.GetBool("transcode.inplace"),
 		Force:     viper.GetBool("transcode.force"),
 		Container: strings.TrimPrefix(viper.GetString("transcode.to"), "."),
@@ -116,6 +123,9 @@ func (c *Config) Validate() error {
 	}
 	if c.CRF < 0 || c.CRF > 51 {
 		return fmt.Errorf("--crf %d out of range (0-51)", c.CRF)
+	}
+	if !ffmpeg.IsKnownHWAccel(c.HWAccel) {
+		return fmt.Errorf("unknown --hwaccel %q; valid: auto, none, nvenc, qsv, vaapi, amf, videotoolbox", c.HWAccel)
 	}
 	return nil
 }
