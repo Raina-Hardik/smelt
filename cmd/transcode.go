@@ -1,6 +1,11 @@
 package cmd
 
 import (
+	"fmt"
+
+	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/scanner"
+	"github.com/Raina-Hardik/smelt/internal/worker"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -26,14 +31,37 @@ func init() {
 		"dry-run", false,
 		"print transcode plan without executing anything",
 	)
-	_ = viper.BindPFlag("transcode.dry_run", transcodeCmd.Flags().Lookup("dry-run"))
+	transcodeCmd.PreRunE = bindTranscodeFlags
 
 	rootCmd.AddCommand(transcodeCmd)
 }
 
 func runTranscode(cmd *cobra.Command, args []string) error {
-	log.Info().Str("cmd", "transcode").Msg("not implemented")
-	return nil
+	cfg := config.Load()
+
+	files, err := scanner.Scan(cfg.Src, cfg.Ext)
+	if err != nil {
+		return fmt.Errorf("scan %s: %w", cfg.Src, err)
+	}
+	if len(files) == 0 {
+		log.Warn().Str("src", cfg.Src).Strs("ext", cfg.Ext).Msg("no matching files")
+		return nil
+	}
+
+	if cfg.DryRun {
+		for _, f := range files {
+			log.Info().
+				Str("src", f.Path).
+				Str("dst", worker.OutputPath(f.Path)).
+				Str("codec", cfg.Codec).
+				Int("crf", cfg.CRF).
+				Msg("plan")
+		}
+		log.Info().Int("files", len(files)).Msg("dry-run complete; nothing written")
+		return nil
+	}
+
+	return worker.New(cfg).Run(cmd.Context(), files)
 }
 
 // addTranscodeFlags registers the flags shared between transcode and tui.
@@ -74,14 +102,31 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"profile", "",
 		"named profile from config; overrides --codec, --crf, --preset",
 	)
+}
 
-	_ = viper.BindPFlag("transcode.src", cmd.Flags().Lookup("src"))
-	_ = viper.BindPFlag("transcode.ext", cmd.Flags().Lookup("ext"))
-	_ = viper.BindPFlag("transcode.codec", cmd.Flags().Lookup("codec"))
-	_ = viper.BindPFlag("transcode.crf", cmd.Flags().Lookup("crf"))
-	_ = viper.BindPFlag("transcode.preset", cmd.Flags().Lookup("preset"))
-	_ = viper.BindPFlag("smelt.workers", cmd.Flags().Lookup("workers"))
-	_ = viper.BindPFlag("transcode.inplace", cmd.Flags().Lookup("inplace"))
-	_ = viper.BindPFlag("transcode.output_dir", cmd.Flags().Lookup("output-dir"))
-	_ = viper.BindPFlag("transcode.profile", cmd.Flags().Lookup("profile"))
+// bindTranscodeFlags binds the invoked command's flags to viper at run time.
+// It must run in PreRunE (not init) because transcode and tui share the same
+// flag set: binding at init would let whichever command registers last win the
+// global viper key, so a flag set on the other command would be silently ignored.
+func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
+	binds := []struct{ key, flag string }{
+		{"transcode.src", "src"},
+		{"transcode.ext", "ext"},
+		{"transcode.codec", "codec"},
+		{"transcode.crf", "crf"},
+		{"transcode.preset", "preset"},
+		{"smelt.workers", "workers"},
+		{"transcode.inplace", "inplace"},
+		{"transcode.output_dir", "output-dir"},
+		{"transcode.profile", "profile"},
+		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent
+	}
+	for _, b := range binds {
+		if f := cmd.Flags().Lookup(b.flag); f != nil {
+			if err := viper.BindPFlag(b.key, f); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
