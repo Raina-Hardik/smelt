@@ -22,7 +22,7 @@ func confirmInplace(cfg *config.Config, n int) (bool, error) {
 }
 
 func promptYesNo(in io.Reader, out io.Writer, prompt string) (bool, error) {
-	fmt.Fprint(out, prompt)
+	_, _ = fmt.Fprint(out, prompt)
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && err != io.EOF {
 		return false, err
