@@ -9,9 +9,10 @@ import (
 )
 
 type MediaFile struct {
-	Path string
-	Ext  string
-	Size int64
+	Path    string
+	RelPath string // path relative to the scan root; used to mirror the tree into --output-dir
+	Ext     string
+	Size    int64
 }
 
 // Scan walks root recursively and returns files whose extensions match the
@@ -38,9 +39,10 @@ func Scan(root string, extensions []string) ([]MediaFile, error) {
 			return err
 		}
 		files = append(files, MediaFile{
-			Path: filepath.Join(root, path),
-			Ext:  ext,
-			Size: info.Size(),
+			Path:    filepath.Join(root, path),
+			RelPath: filepath.FromSlash(path), // GlobWalk yields slash-separated paths
+			Ext:     ext,
+			Size:    info.Size(),
 		})
 		return nil
 	})

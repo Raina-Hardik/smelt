@@ -1,0 +1,55 @@
+package scanner
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestScan(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.mkv"))
+	mustWrite(t, filepath.Join(root, "sub", "b.MP4")) // nested + uppercase ext
+	mustWrite(t, filepath.Join(root, "sub", "c.txt")) // excluded extension
+	mustWrite(t, filepath.Join(root, "d.mp4"))
+
+	// leading dot on one extension should be tolerated
+	files, err := Scan(root, []string{"mkv", ".mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byRel := make(map[string]MediaFile, len(files))
+	for _, f := range files {
+		byRel[f.RelPath] = f
+	}
+
+	if len(byRel) != 3 {
+		t.Fatalf("expected 3 matches, got %d: %v", len(byRel), byRel)
+	}
+	if _, ok := byRel["c.txt"]; ok {
+		t.Error("c.txt should have been excluded")
+	}
+
+	nested := filepath.Join("sub", "b.MP4")
+	f, ok := byRel[nested]
+	if !ok {
+		t.Fatalf("missing nested match %q in %v", nested, byRel)
+	}
+	if want := filepath.Join(root, "sub", "b.MP4"); f.Path != want {
+		t.Errorf("Path = %q, want %q", f.Path, want)
+	}
+	if f.Ext != "mp4" {
+		t.Errorf("Ext = %q, want %q (lowercased)", f.Ext, "mp4")
+	}
+}
+
+func mustWrite(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
