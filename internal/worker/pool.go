@@ -164,14 +164,16 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	return nil
 }
 
-// Plan filters a scanned file list down to what actually needs transcoding,
-// making non-inplace re-runs idempotent. It drops (a) our own previously
-// generated outputs (`*<suffix><ext>`) and (b) sources whose output already
-// exists, unless cfg.Force is set. In-place mode is returned unchanged —
-// idempotency there would require codec probing and is out of scope.
-func Plan(files []scanner.MediaFile, cfg *config.Config) (todo []scanner.MediaFile, skipped int) {
+// Plan filters a scanned file list down to what actually needs transcoding.
+// Non-inplace runs drop (a) our own previously generated outputs
+// (`*<suffix><ext>`) and (b) sources whose output already exists. In-place runs
+// probe each file's video codec and drop those already in the target codec.
+// cfg.Force disables all skipping.
+func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config) (todo []scanner.MediaFile, skipped int) {
 	if cfg.InPlace {
-		return files, 0
+		return planInplace(files, cfg, func(p string) (string, error) {
+			return ffmpeg.ProbeVideoCodec(ctx, p)
+		})
 	}
 	for _, f := range files {
 		if isOwnOutput(f.Path, cfg.Suffix) {
@@ -180,6 +182,26 @@ func Plan(files []scanner.MediaFile, cfg *config.Config) (todo []scanner.MediaFi
 		}
 		if !cfg.Force {
 			if _, err := os.Stat(OutputPath(f, cfg)); err == nil {
+				skipped++
+				continue
+			}
+		}
+		todo = append(todo, f)
+	}
+	return todo, skipped
+}
+
+// planInplace keeps only files that aren't already in the target codec. The
+// probe is injected for testability. On probe failure (or an unknown target)
+// the file is kept — better to attempt a transcode than to wrongly skip.
+func planInplace(files []scanner.MediaFile, cfg *config.Config, probe func(string) (string, error)) (todo []scanner.MediaFile, skipped int) {
+	if cfg.Force {
+		return files, 0
+	}
+	target := ffmpeg.CodecName(cfg.Codec)
+	for _, f := range files {
+		if target != "" {
+			if cur, err := probe(f.Path); err == nil && cur == target {
 				skipped++
 				continue
 			}

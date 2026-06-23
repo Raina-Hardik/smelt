@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestCodecName(t *testing.T) {
+	cases := map[string]string{
+		"h265": "hevc", "hevc": "hevc", "H265": "hevc",
+		"h264": "h264", "avc": "h264",
+		"av1": "av1", "vp9": "vp9",
+		"bogus": "",
+	}
+	for in, want := range cases {
+		if got := CodecName(in); got != want {
+			t.Errorf("CodecName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestEncoderName(t *testing.T) {
 	cases := map[[2]string]string{
 		{"h265", "nvenc"}:  "hevc_nvenc",

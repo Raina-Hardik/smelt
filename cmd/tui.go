@@ -42,9 +42,9 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)
 	}
 
-	files, _ = worker.Plan(files, cfg)
+	files, _ = worker.Plan(cmd.Context(), files, cfg)
 	if len(files) == 0 {
-		return fmt.Errorf("nothing to transcode; all outputs already exist (use --force)")
+		return fmt.Errorf("nothing to transcode; files are already up to date (use --force)")
 	}
 
 	// Confirm the destructive --inplace path before taking over the screen.

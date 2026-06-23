@@ -52,9 +52,9 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	files, skipped := worker.Plan(files, cfg)
+	files, skipped := worker.Plan(cmd.Context(), files, cfg)
 	if skipped > 0 {
-		log.Info().Int("skipped", skipped).Msg("skipped existing outputs (use --force to re-transcode)")
+		log.Info().Int("skipped", skipped).Msg("skipped up-to-date files (use --force to re-transcode)")
 	}
 	if len(files) == 0 {
 		log.Info().Msg("nothing to transcode; all outputs already exist")
@@ -116,7 +116,7 @@ func addTranscodeFlags(cmd *cobra.Command) {
 	)
 	cmd.Flags().Bool(
 		"inplace", false,
-		"replace original file after successful transcode",
+		"replace original after transcode; files already in the target codec are skipped (use --force to re-encode)",
 	)
 	cmd.Flags().Bool(
 		"force", false,
