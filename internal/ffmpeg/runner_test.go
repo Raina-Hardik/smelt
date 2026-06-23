@@ -63,6 +63,26 @@ func TestRateControlArgs(t *testing.T) {
 	}
 }
 
+func TestPresetsFor(t *testing.T) {
+	cases := []struct {
+		backend, encoder string
+		want             []string
+	}{
+		{"nvenc", "hevc_nvenc", nvencPresets},
+		{"qsv", "h264_qsv", qsvPresets},
+		{"", "libx265", x264Presets},
+		{"", "libsvtav1", svtPresets},
+		{"", "libvpx-vp9", nil},
+		{"vaapi", "hevc_vaapi", nil},
+		{"amf", "hevc_amf", nil},
+	}
+	for _, c := range cases {
+		if got := PresetsFor(c.backend, c.encoder); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("PresetsFor(%q,%q) = %v, want %v", c.backend, c.encoder, got, c.want)
+		}
+	}
+}
+
 func TestBuildArgs(t *testing.T) {
 	spec := EncodeSpec{
 		Codec:     "h265",

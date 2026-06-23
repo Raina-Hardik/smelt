@@ -104,7 +104,7 @@ func addTranscodeFlags(cmd *cobra.Command) {
 	)
 	cmd.Flags().String(
 		"preset", "medium",
-		"ffmpeg encoding preset",
+		"encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast')",
 	)
 	cmd.Flags().String(
 		"hwaccel", "auto",
