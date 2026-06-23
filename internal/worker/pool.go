@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
@@ -17,10 +18,11 @@ import (
 )
 
 type Pool struct {
-	cfg     *config.Config
-	sem     *semaphore.Weighted
-	encoder string // resolved once per run via resolveEncoder
-	backend string
+	cfg         *config.Config
+	sem         *semaphore.Weighted
+	resolveOnce sync.Once
+	encoder     string // resolved once per run via resolveEncoder
+	backend     string
 }
 
 func New(cfg *config.Config) *Pool {
@@ -31,63 +33,56 @@ func New(cfg *config.Config) *Pool {
 }
 
 // resolveEncoder probes for the hardware encoder once (it spawns ffmpeg) and
-// records the choice for all files in this run.
+// records the choice for all files in this run. Safe to call concurrently and
+// repeatedly; only the first call probes, the rest see the cached result. It
+// does not log — callers (CLI) log the choice; the TUI shows it on screen.
 func (p *Pool) resolveEncoder(ctx context.Context) {
-	p.encoder, p.backend = ffmpeg.ResolveEncoder(ctx, p.cfg.Codec, p.cfg.HWAccel)
-	log.Info().
-		Str("codec", p.cfg.Codec).
-		Str("hwaccel", p.cfg.HWAccel).
-		Str("encoder", p.encoder).
-		Msg("encoder selected")
+	p.resolveOnce.Do(func() {
+		p.encoder, p.backend = ffmpeg.ResolveEncoder(ctx, p.cfg.Codec, p.cfg.HWAccel)
+	})
+}
+
+// Resolve probes (once) and returns the concrete encoder and backend that this
+// run will use. The TUI calls it before starting so the pre-flight screen can
+// show e.g. "auto → hevc_nvenc" without re-probing when the pool runs.
+func (p *Pool) Resolve(ctx context.Context) (encoder, backend string) {
+	p.resolveEncoder(ctx)
+	return p.encoder, p.backend
 }
 
 // Run transcodes all files, logging results via zerolog. Blocks until done.
+// It is a thin wrapper over RunWithCallbacks so both entry points share one
+// dispatch loop; the callbacks here just translate events into log lines.
 func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 	start := time.Now()
-	p.resolveEncoder(ctx)
-	results := make(chan error, len(files))
-	var wg sync.WaitGroup
+	enc, backend := p.Resolve(ctx)
+	log.Info().
+		Str("codec", p.cfg.Codec).
+		Str("hwaccel", p.cfg.HWAccel).
+		Str("encoder", enc).
+		Str("backend", backend).
+		Msg("encoder selected")
 
-	for _, f := range files {
-		f := f
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := p.sem.Acquire(ctx, 1); err != nil {
-				results <- fmt.Errorf("%s: %w", f.Path, err)
-				return
-			}
-			defer p.sem.Release(1)
+	var failed atomic.Int64
 
-			log.Info().Str("file", f.Path).Msg("starting")
-			err := p.transcode(ctx, f, func(ev ffmpeg.ProgressEvent) {
-				log.Debug().
-					Str("file", filepath.Base(ev.FilePath)).
-					Int("pct", int(ev.Percent*100)).
-					Msg("progress")
-			})
+	p.RunWithCallbacks(ctx, files,
+		func(ev ffmpeg.ProgressEvent) {
+			log.Debug().
+				Str("file", filepath.Base(ev.FilePath)).
+				Int("pct", int(ev.Percent*100)).
+				Msg("progress")
+		},
+		func(f scanner.MediaFile, err error) {
 			if err != nil {
+				failed.Add(1)
 				log.Error().Err(err).Str("file", f.Path).Msg("failed")
-				results <- err
 			} else {
 				log.Info().Str("file", f.Path).Msg("done")
-				results <- nil
 			}
-		}()
-	}
+		},
+	)
 
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	var errCount int
-	for err := range results {
-		if err != nil {
-			errCount++
-		}
-	}
-
+	errCount := int(failed.Load())
 	log.Info().
 		Int("ok", len(files)-errCount).
 		Int("failed", errCount).
