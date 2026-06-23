@@ -146,13 +146,15 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	}()
 
 	spec := ffmpeg.EncodeSpec{
-		Codec:     p.cfg.Codec,
-		CRF:       p.cfg.CRF,
-		Preset:    p.cfg.Preset,
-		ExtraArgs: p.cfg.ExtraArgs,
-		Container: strings.TrimPrefix(filepath.Ext(dst), "."),
-		Encoder:   p.encoder,
-		Backend:   p.backend,
+		Codec:        p.cfg.Codec,
+		CRF:          p.cfg.CRF,
+		Preset:       p.cfg.Preset,
+		AudioCodec:   p.cfg.AudioCodec,
+		AudioBitrate: p.cfg.AudioBitrate,
+		ExtraArgs:    p.cfg.ExtraArgs,
+		Container:    strings.TrimPrefix(filepath.Ext(dst), "."),
+		Encoder:      p.encoder,
+		Backend:      p.backend,
 	}
 	if err = ffmpeg.Run(ctx, f.Path, tmp, spec, onProgress); err != nil {
 		return err

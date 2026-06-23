@@ -25,13 +25,15 @@ type ProgressEvent struct {
 // keeping this package ignorant of config/viper. Grow this struct rather than
 // the Run signature when adding encode options.
 type EncodeSpec struct {
-	Codec     string   // alias (h264|h265|av1|vp9) or a raw encoder name
-	CRF       int      // constant rate factor
-	Preset    string   // encoder preset; ignored by codecs that don't take one
-	Container string   // output container (e.g. mp4); drives container-specific muxer flags
-	Encoder   string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
-	Backend   string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
-	ExtraArgs []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
+	Codec        string   // alias (h264|h265|av1|vp9) or a raw encoder name
+	CRF          int      // constant rate factor
+	Preset       string   // encoder preset; ignored by codecs that don't take one
+	Container    string   // output container (e.g. mp4); drives container-specific muxer flags
+	Encoder      string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
+	Backend      string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
+	AudioCodec   string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
+	AudioBitrate string   // e.g. "192k"; applied only when re-encoding audio
+	ExtraArgs    []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -112,7 +114,7 @@ func buildArgs(src, dst string, spec EncodeSpec) []string {
 	args = append(args, "-i", src)
 	args = append(args, videoFilterArgs(spec)...)
 	args = append(args, rateControlArgs(spec)...)
-	args = append(args, "-c:a", "copy") // audio passthrough is out of scope for v1
+	args = append(args, audioArgs(spec)...)
 	args = append(args, containerArgs(spec)...)
 	args = append(args, spec.ExtraArgs...)
 	args = append(args, "-y", dst)
@@ -325,6 +327,52 @@ func isNumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+// audioArgs builds the audio-stream flags. The default (copy/"") stream-copies
+// the audio untouched; any other codec re-encodes, optionally at -b:a bitrate.
+func audioArgs(spec EncodeSpec) []string {
+	if spec.AudioCodec == "" || strings.EqualFold(spec.AudioCodec, "copy") {
+		return []string{"-c:a", "copy"}
+	}
+	args := []string{"-c:a", audioCodecFlag(spec.AudioCodec)}
+	if spec.AudioBitrate != "" {
+		args = append(args, "-b:a", spec.AudioBitrate)
+	}
+	return args
+}
+
+// audioCodecAliases maps user-facing audio codec names to ffmpeg encoders.
+var audioCodecAliases = map[string]string{
+	"copy": "copy",
+	"aac":  "aac",
+	"opus": "libopus",
+	"mp3":  "libmp3lame",
+	"ac3":  "ac3",
+	"flac": "flac",
+}
+
+func audioCodecFlag(codec string) string {
+	if enc, ok := audioCodecAliases[strings.ToLower(codec)]; ok {
+		return enc
+	}
+	return codec // passthrough for raw encoder names
+}
+
+// IsKnownAudioCodec reports whether codec is a recognized audio alias.
+func IsKnownAudioCodec(codec string) bool {
+	_, ok := audioCodecAliases[strings.ToLower(codec)]
+	return ok
+}
+
+// KnownAudioCodecs returns the recognized audio aliases, sorted.
+func KnownAudioCodecs() []string {
+	out := make([]string, 0, len(audioCodecAliases))
+	for k := range audioCodecAliases {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // codecAliases maps user-facing codec names to ffmpeg software encoders.

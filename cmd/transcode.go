@@ -110,6 +110,14 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"hwaccel", "auto",
 		"hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox",
 	)
+	cmd.Flags().String(
+		"audio-codec", "copy",
+		"audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode)",
+	)
+	cmd.Flags().String(
+		"audio-bitrate", "",
+		"audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)",
+	)
 	cmd.Flags().Int(
 		"workers", 0,
 		"maximum parallel transcode jobs; 0 = runtime.NumCPU()",
@@ -160,6 +168,8 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.crf", "crf"},
 		{"transcode.preset", "preset"},
 		{"transcode.hwaccel", "hwaccel"},
+		{"transcode.audio_codec", "audio-codec"},
+		{"transcode.audio_bitrate", "audio-bitrate"},
 		{"smelt.workers", "workers"},
 		{"transcode.inplace", "inplace"},
 		{"transcode.skip_hardlinked", "skip-hardlinked"},

@@ -88,6 +88,19 @@ func TestValidateRejectsBadCodecAndCRF(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsBadAudioCodec(t *testing.T) {
+	viper.Reset()
+	if err := (&Config{Codec: "h265", AudioCodec: "mp9"}).Validate(); err == nil {
+		t.Error("expected unknown audio codec to be rejected")
+	}
+	if err := (&Config{Codec: "h265", AudioCodec: "opus"}).Validate(); err != nil {
+		t.Errorf("opus should be valid: %v", err)
+	}
+	if err := (&Config{Codec: "h265"}).Validate(); err != nil { // empty == copy
+		t.Errorf("empty audio codec should be valid: %v", err)
+	}
+}
+
 func TestValidateRejectsInplaceWithOutputDir(t *testing.T) {
 	viper.Reset()
 	cfg := &Config{InPlace: true, OutputDir: "/out"}

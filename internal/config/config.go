@@ -24,6 +24,8 @@ type Config struct {
 	Codec          string
 	CRF            int
 	Preset         string
+	AudioCodec     string // audio codec alias or "copy" (default copy = stream-copy)
+	AudioBitrate   string // e.g. "192k"; applied only when re-encoding audio
 	HWAccel        string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
 	InPlace        bool
 	SkipHardlinked bool   // --inplace: skip files hardlinked elsewhere (avoid breaking the link)
@@ -58,6 +60,11 @@ func Load() *Config {
 		hwaccel = "auto"
 	}
 
+	audioCodec := viper.GetString("transcode.audio_codec")
+	if audioCodec == "" {
+		audioCodec = "copy"
+	}
+
 	return &Config{
 		Workers:   workers,
 		LogLevel:  viper.GetString("smelt.log_level"),
@@ -68,6 +75,8 @@ func Load() *Config {
 		Codec:          viper.GetString("transcode.codec"),
 		CRF:            viper.GetInt("transcode.crf"),
 		Preset:         viper.GetString("transcode.preset"),
+		AudioCodec:     audioCodec,
+		AudioBitrate:   viper.GetString("transcode.audio_bitrate"),
 		HWAccel:        hwaccel,
 		InPlace:        viper.GetBool("transcode.inplace"),
 		SkipHardlinked: viper.GetBool("transcode.skip_hardlinked"),
@@ -128,6 +137,9 @@ func (c *Config) Validate() error {
 	}
 	if !ffmpeg.IsKnownHWAccel(c.HWAccel) {
 		return fmt.Errorf("unknown --hwaccel %q; valid: auto, none, nvenc, qsv, vaapi, amf, videotoolbox", c.HWAccel)
+	}
+	if c.AudioCodec != "" && !ffmpeg.IsKnownAudioCodec(c.AudioCodec) { // "" == copy (Load defaults it)
+		return fmt.Errorf("unknown --audio-codec %q; valid: %s", c.AudioCodec, strings.Join(ffmpeg.KnownAudioCodecs(), ", "))
 	}
 	return nil
 }
