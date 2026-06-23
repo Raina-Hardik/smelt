@@ -49,13 +49,17 @@ tag VERSION: ci
     git tag -a {{VERSION}} -m "Release {{VERSION}}"
     git push origin {{VERSION}}
 
-# Run transcode against testdata without building.
-run-transcode *ARGS:
+# Run transcode against testdata without building (clears prior outputs first).
+run-transcode *ARGS: clean-testdata
     go run . transcode --src ./testdata {{ARGS}}
 
-# Launch the TUI against testdata without building.
-run-tui *ARGS:
+# Launch the TUI against testdata without building (clears prior outputs first).
+run-tui *ARGS: clean-testdata
     go run . tui --src ./testdata {{ARGS}}
+
+# Remove smelt-generated outputs from testdata so re-runs aren't skipped as idempotent.
+clean-testdata:
+    rm -f testdata/*.smelt.* testdata/*.transcoded.*
 
 # Generate a 30s test media file at testdata/sample.mp4 (requires ffmpeg).
 testdata:

@@ -8,3 +8,6 @@ smelt-testdata/
 
 # real-media testing env (built by scripts/build-smelt-dataset.sh)
 smelt-sample-testcase/
+
+# local dev media (generated samples + their transcoded outputs)
+testdata/
