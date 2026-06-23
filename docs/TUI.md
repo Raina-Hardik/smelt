@@ -42,9 +42,23 @@ run.
 Editable fields: **codec** (`h264`/`h265`/`av1`/`vp9`), **crf** (0–51),
 **preset**, **hwaccel** (`auto`/`none`/backend), **workers**. Changing codec or
 hwaccel re-probes; the `hwaccel` row reads `resolving…` until the probe returns.
-Each field maps 1:1 to its CLI flag — the screen adds no behavior the flags
-can't express. For a destructive `--inplace` run, the confirmation prompt still
-happens on the normal terminal *before* this screen.
+
+The **preset** list is filtered to the encoder that was actually resolved, so
+you can only pick a value that encoder accepts:
+
+| Resolved encoder | Presets offered |
+|---|---|
+| `libx264` / `libx265` (software) | `ultrafast … veryslow` |
+| `*_nvenc` | `p1 … p7` |
+| `*_qsv` | `veryfast … veryslow` |
+| `libsvtav1` | `2 … 12` (SVT-AV1 numbers) |
+| `libvpx-vp9`, `*_vaapi`, `*_amf`, `*_videotoolbox` | `n/a` (no preset) |
+
+If a re-probe lands on an encoder for which the current preset isn't valid, it
+snaps to that encoder's default. Each field maps 1:1 to its CLI flag — the
+screen adds no behavior the flags can't express. For a destructive `--inplace`
+run, the confirmation prompt still happens on the normal terminal *before* this
+screen.
 
 ---
 
