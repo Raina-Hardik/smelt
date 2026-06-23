@@ -104,7 +104,8 @@ func (le listEntry) Description() string { return le.status.label() }
 
 type Model struct {
 	cfg        *config.Config
-	field      confField // focused field on the editable pre-flight screen
+	pool       *worker.Pool // created when the run starts; nil on the pre-flight screen
+	field      confField    // focused field on the editable pre-flight screen
 	files      []scanner.MediaFile
 	fileItems  []fileItem
 	fileIndex  map[string]int // path → index in fileItems
@@ -124,6 +125,7 @@ type Model struct {
 	quitting   bool
 	cancelling bool // q/Ctrl+C pressed: draining in-flight work before exit
 	finished   bool // the worker pool drained on its own (allDoneMsg seen)
+	paused     bool // dispatch paused via p (in-flight jobs keep running)
 	showHelp   bool
 }
 
@@ -185,11 +187,10 @@ func (m Model) resolveCmd() tea.Cmd {
 	}
 }
 
-// runPool builds the worker pool from the (possibly edited) config and feeds its
-// events onto m.events. Called once, when the user starts the run. The pool is
-// created here, not in New, so edits to workers/codec/hwaccel take effect.
-func (m Model) runPool() {
-	pool := worker.New(m.cfg)
+// launch starts m.pool and feeds its events onto m.events. m.pool must be set
+// (in handlePreflightKey) first, so p can later toggle its pause state.
+func (m Model) launch() {
+	pool := m.pool
 	go func() {
 		pool.RunWithCallbacks(m.ctx, m.files,
 			func(ev ffmpeg.ProgressEvent) { m.events <- progressMsg{ev: ev} },
@@ -294,8 +295,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handlePreflightKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "s":
+		m.pool = worker.New(m.cfg)
 		m.started = true
-		m.runPool()
+		m.launch()
 		return m, listenForEvent(m.events)
 	case "q", "ctrl+c":
 		m.quitting = true // nothing running yet; just exit
@@ -406,6 +408,13 @@ func (m Model) handleRunningKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancel()
 		m.quitting = true
 		return m, tea.Quit
+
+	case "p":
+		// Pause/resume starting new jobs; in-flight ffmpeg is untouched.
+		if m.pool != nil && !m.finished && !m.cancelling {
+			m.paused = m.pool.TogglePause()
+		}
+		return m, nil
 	}
 
 	// Everything else (↑/↓, j/k, g/G, …) drives the file-queue list.
@@ -467,6 +476,9 @@ func (m Model) View() string {
 		"  ",
 		theme.Subtitle.Render(statsStr),
 	)
+	if m.paused {
+		header = lipgloss.JoinHorizontal(lipgloss.Top, header, "  ", theme.StatusAct.Render("⏸ paused"))
+	}
 
 	// Force each panel to span the terminal; without an explicit width lipgloss
 	// shrinks a bordered box to its longest line, hugging the left edge.
@@ -490,7 +502,10 @@ func (m Model) statusBar() string {
 	if m.cancelling {
 		return theme.StatusCxl.Render("cancelling… (Q force-quit)")
 	}
-	return theme.Help.Render("q quit · Q force-quit · ↑↓/jk navigate · ? help")
+	if m.paused {
+		return theme.StatusAct.Render("paused — p resume · q quit")
+	}
+	return theme.Help.Render("q quit · Q force-quit · p pause · ↑↓/jk navigate · ? help")
 }
 
 func (m Model) renderActiveFiles() string {
@@ -628,6 +643,7 @@ func (m Model) outputSummary() string {
 func (m Model) helpView() string {
 	rows := [][2]string{
 		{"enter / s", "start the run (pre-flight screen only)"},
+		{"p", "pause / resume starting new jobs (running jobs continue)"},
 		{"q / Ctrl+C", "cancel active jobs, wait for cleanup, then quit"},
 		{"Q", "force-quit immediately (cancels jobs, skips waiting)"},
 		{"↑ / k", "move selection up in the file queue"},
