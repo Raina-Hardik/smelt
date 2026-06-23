@@ -14,19 +14,25 @@ smelt/
 │   ├── root.go              Root command, persistent flags, zerolog/viper init
 │   ├── transcode.go         `smelt transcode` — delegates to scanner + worker
 │   ├── tui.go               `smelt tui` — delegates to scanner + tui.Model
+│   ├── workflow.go          `smelt workflow` — emits a schedulable shell script
 │   ├── config.go            `smelt config init` — writes starter config.yaml
 │   └── version.go           `smelt version` — prints build metadata
 └── internal/                All business logic; not importable outside the module
     ├── config/
     │   └── config.go        Config struct + Load() — reads viper state
     ├── scanner/
-    │   └── scanner.go       Scan() — doublestar walk → []MediaFile
+    │   ├── scanner.go       Scan() — doublestar walk → []MediaFile
+    │   └── links_{unix,other}.go  hardlink-count helper (build-tagged)
     ├── ffmpeg/
-    │   └── runner.go        Run() — exec wrapper, progress parsing, typed errors
+    │   ├── runner.go        Run(EncodeSpec) — exec wrapper, progress parsing, typed errors
+    │   └── accel.go         ResolveEncoder() — functional HW-encoder probe + fallback
     ├── worker/
-    │   └── pool.go          Pool — semaphore dispatch, Run() + RunWithCallbacks()
+    │   ├── pool.go          Pool — sequential dispatch, Run() + RunWithCallbacks()
+    │   └── gate.go          pausable dispatch gate (TogglePause/Paused)
+    ├── workflow/
+    │   └── workflow.go      Script() — render a transcode job as a shell script
     └── tui/
-        ├── model.go         bubbletea Model — Init/Update/View
+        ├── model.go         bubbletea Model — editable pre-flight, Init/Update/View
         ├── progress.go      Per-file progress bar helpers
         └── styles.go        Lipgloss theme constants
 ```
@@ -92,22 +98,28 @@ CLI flags / config.yaml / env vars
    Scan is intentionally single-threaded and fast; it is not the bottleneck.
 
 3. **Worker pool** — `worker.New(cfg)` constructs a `Pool` with a
-   `semaphore.Weighted` of size `cfg.Workers`. `Pool.Run()` launches one
-   goroutine per file. Each goroutine acquires one semaphore slot before
-   calling `ffmpeg.Run()` and releases it after. This caps parallelism at
-   exactly `cfg.Workers` in-flight processes.
+   `semaphore.Weighted` of size `cfg.Workers` and a pausable dispatch gate. The
+   dispatch loop is **sequential**: for each file it waits at the gate (a no-op
+   unless paused via the TUI's `p`), acquires one semaphore slot, then spawns a
+   goroutine that runs `ffmpeg.Run()` and releases the slot. The semaphore caps
+   parallelism at exactly `cfg.Workers`; pausing withholds *new* dispatch while
+   in-flight jobs run on. The encoder is resolved once per run (`ResolveEncoder`,
+   a functional GPU probe) and reused for every file.
 
-4. **ffmpeg runner** — `ffmpeg.Run(ctx, src, dst, codec, onProgress)` builds
-   the ffmpeg argument list, starts the process, and reads stderr line-by-line.
+4. **ffmpeg runner** — `ffmpeg.Run(ctx, src, dst, spec, onProgress)` takes a
+   resolved `EncodeSpec` (codec, crf, preset, audio, container, resolved
+   encoder/backend, passthrough args), builds the argument list, starts the
+   process, and reads stderr line-by-line.
    Each line matching `time=HH:MM:SS.cs` emits a `ProgressEvent` via the
    `onProgress` callback. On process exit, `cmd.Wait()` returns; a non-zero
    exit produces an `*ExecError`; an OS-level failure (fork, pipe) produces an
    `*OSError`. The caller can distinguish these with a type switch.
 
-5. **Result aggregation** — `Pool.Run()` collects results from a buffered
-   channel. After all goroutines finish, it counts failures and returns a
-   summary error if any files failed. `Pool.RunWithCallbacks()` (used by the
-   TUI) fires `onProgress` and `onComplete` callbacks inline instead.
+5. **Result aggregation** — `Pool.Run()` (the CLI path) is a thin wrapper over
+   `Pool.RunWithCallbacks()`: it passes zerolog callbacks, tallies failures with
+   an atomic counter, and returns a summary error if any files failed. The TUI
+   passes callbacks that forward typed `tea.Msg` values to its event channel.
+   Both share the one dispatch loop.
 
 6. **Reporter** — In CLI mode the pool logs each event via `zerolog`. In TUI
    mode the callbacks send typed `tea.Msg` values to a buffered channel that
@@ -143,11 +155,12 @@ cmd.Wait()                ← returns *exec.ExitError with exit -1
 
 Key invariants:
 - No goroutine blocks indefinitely after context cancellation.
-- Partial output files (`.smelt` suffix) are cleaned up by the worker on any
-  non-zero ffmpeg exit, including cancellation.
-- The TUI passes `cmd.Context()` from the cobra command into `tui.New()`,
-  ensuring the same cancellation signal reaches workers when the user presses
-  `q`.
+- The transient working file (`<name>.transcoded<ext>`) is deleted by the worker
+  on any non-zero ffmpeg exit, including cancellation; it never survives a run.
+  The final `.smelt` output only exists after a successful rename.
+- The TUI derives a cancellable child of `cmd.Context()` and calls its cancel
+  func on `q`/`Q`, so an in-app quit kills in-flight ffmpeg even without an OS
+  signal; on `q` it then waits for the pool to drain before exiting.
 
 ---
 
@@ -229,24 +242,31 @@ case *ffmpeg.OSError:
 ```
 tui.Model.Init()
     │
-    ├── go pool.RunWithCallbacks(ctx, files, onProgress, onComplete)
-    │       │ sends progressMsg / completeMsg / allDoneMsg → events chan
+    └── return resolveCmd()       ← probes the encoder for the pre-flight screen
+                                    (the pool is NOT started yet)
+
+  ── editable pre-flight screen ──
+    user edits codec/crf/preset/hwaccel/workers, then presses enter/s
     │
-    └── return listenForEvent(events)  ← first Cmd, blocks on channel read
+    └── pool = worker.New(cfg);  go pool.RunWithCallbacks(...)
+            sends progressMsg / completeMsg / allDoneMsg → events chan
+        return listenForEvent(events)  ← begin draining the channel
 
 tui.Model.Update(msg)
+    │
+    ├── resolvedMsg  → record the concrete encoder for the hwaccel row
     │
     ├── progressMsg  → update fileItems[i].percent, SetPercent → animation Cmd
     │                  return listenForEvent(events)  ← re-subscribe
     │
-    ├── completeMsg  → mark done/error, append log, update list item
+    ├── completeMsg  → mark done/error/cancelled, append log, update list item
     │                  return listenForEvent(events)
     │
-    ├── allDoneMsg   → append summary log, stop re-subscribing
+    ├── allDoneMsg   → mark finished (or quit, if cancelling)
     │
     ├── progress.FrameMsg → tick all active progress.Model.Update()
     │
-    └── tea.KeyMsg   → handle q/Q/p/j/k/?
+    └── tea.KeyMsg   → pre-flight: edit/start;  running: q/Q/p/j/k/?
 ```
 
 The `listenForEvent` pattern is safe because the events channel is buffered
