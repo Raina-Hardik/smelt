@@ -63,6 +63,26 @@ func TestRateControlArgs(t *testing.T) {
 	}
 }
 
+func TestAudioArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		spec EncodeSpec
+		want []string
+	}{
+		{"default copies audio", EncodeSpec{}, []string{"-c:a", "copy"}},
+		{"explicit copy", EncodeSpec{AudioCodec: "copy"}, []string{"-c:a", "copy"}},
+		{"aac without bitrate", EncodeSpec{AudioCodec: "aac"}, []string{"-c:a", "aac"}},
+		{"aac with bitrate", EncodeSpec{AudioCodec: "aac", AudioBitrate: "192k"}, []string{"-c:a", "aac", "-b:a", "192k"}},
+		{"opus aliases to libopus", EncodeSpec{AudioCodec: "opus", AudioBitrate: "128k"}, []string{"-c:a", "libopus", "-b:a", "128k"}},
+		{"raw encoder passthrough", EncodeSpec{AudioCodec: "libfdk_aac"}, []string{"-c:a", "libfdk_aac"}},
+	}
+	for _, c := range cases {
+		if got := audioArgs(c.spec); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: audioArgs = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestPresetsFor(t *testing.T) {
 	cases := []struct {
 		backend, encoder string
