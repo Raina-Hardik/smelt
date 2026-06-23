@@ -33,6 +33,13 @@ transcode:
   # ffmpeg encoding preset: ultrafast | fast | medium | slow | veryslow
   preset: medium
 
+  # Audio codec: copy | aac | opus | mp3 | ac3 | flac
+  # "copy" stream-copies the audio untouched; others re-encode.
+  audio_codec: copy
+
+  # Audio bitrate when re-encoding (e.g. 192k). Ignored when audio_codec: copy.
+  audio_bitrate: ""
+
   # Replace original file after a confirmed successful transcode.
   # WARNING: the original is unrecoverable after this operation.
   inplace: false

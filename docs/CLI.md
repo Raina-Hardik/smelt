@@ -103,6 +103,8 @@ Examples:
   smelt transcode --src /mnt/media --output-dir /mnt/transcoded
 
 Flags:
+      --audio-bitrate string     audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
+      --audio-codec string       audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string             target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
       --dry-run                  print transcode plan without executing anything
@@ -132,6 +134,8 @@ Global Flags:
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `--audio-codec` | string | `copy` | Audio codec. `copy` stream-copies the audio untouched (no re-encode). Other values re-encode: `aac`, `opus` (→ `libopus`), `mp3` (→ `libmp3lame`), `ac3`, `flac`. |
+| `--audio-bitrate` | string | _(encoder default)_ | Target audio bitrate when re-encoding, e.g. `192k`. Ignored when `--audio-codec=copy`. |
 | `--codec` | string | `h265` | Target video codec. Valid values: `h264`, `h265`, `av1`, `vp9`. Maps to `libx264`, `libx265`, `libsvtav1`, `libvpx-vp9` respectively. |
 | `--crf` | int | `23` | Constant Rate Factor controlling quality vs. file size. Lower values produce higher quality. Valid range: 0–51. |
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
@@ -174,6 +178,8 @@ Usage:
   smelt tui [flags]
 
 Flags:
+      --audio-bitrate string     audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
+      --audio-codec string       audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string             target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
       --ext strings              file extensions to match (default [mkv,mp4,avi])
@@ -323,6 +329,8 @@ uppercase and underscores. Flag precedence (highest to lowest):
 | `--codec` | `SMELT_CODEC` |
 | `--crf` | `SMELT_CRF` |
 | `--preset` | `SMELT_PRESET` |
+| `--audio-codec` | `SMELT_AUDIO_CODEC` |
+| `--audio-bitrate` | `SMELT_AUDIO_BITRATE` |
 | `--workers` | `SMELT_WORKERS` |
 | `--inplace` | `SMELT_INPLACE` |
 | `--skip-hardlinked` | `SMELT_SKIP_HARDLINKED` |
