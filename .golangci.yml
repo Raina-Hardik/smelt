@@ -9,6 +9,10 @@ linters:
   enable:
     - misspell
     - unconvert
+  settings:
+    misspell:
+      ignore-rules:
+        - hardlinked # established term (rsync et al.), not a misspelling of "hardline"
 
 formatters:
   enable:

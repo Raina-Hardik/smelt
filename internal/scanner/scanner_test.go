@@ -44,6 +44,30 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestScanReportsHardlinks(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.mkv")
+	mustWrite(t, a)
+	if err := os.Link(a, filepath.Join(root, "b.mkv")); err != nil {
+		t.Skipf("hardlinks unsupported here: %v", err)
+	}
+	files, err := Scan(root, []string{"mkv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("scanned %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if f.Links == 0 {
+			t.Skip("platform does not report link counts")
+		}
+		if f.Links != 2 {
+			t.Errorf("%s: Links = %d, want 2", f.Path, f.Links)
+		}
+	}
+}
+
 func mustWrite(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

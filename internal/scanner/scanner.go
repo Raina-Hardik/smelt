@@ -13,6 +13,7 @@ type MediaFile struct {
 	RelPath string // path relative to the scan root; used to mirror the tree into --output-dir
 	Ext     string
 	Size    int64
+	Links   uint64 // hardlink count (st_nlink); >1 means the file is hardlinked elsewhere
 }
 
 // Scan walks root recursively and returns files whose extensions match the
@@ -43,6 +44,7 @@ func Scan(root string, extensions []string) ([]MediaFile, error) {
 			RelPath: filepath.FromSlash(path), // GlobWalk yields slash-separated paths
 			Ext:     ext,
 			Size:    info.Size(),
+			Links:   fileLinks(info),
 		})
 		return nil
 	})

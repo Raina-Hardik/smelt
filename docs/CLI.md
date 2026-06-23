@@ -115,6 +115,7 @@ Flags:
       --output-dir string        write output files to this directory instead of alongside source
       --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
+      --skip-hardlinked          with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
       --src string               source directory to scan (default ".")
       --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
       --to string                target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
@@ -142,6 +143,7 @@ Global Flags:
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
 | `--preset` | string | `medium` | Encoding preset (speed/quality trade-off). Given an x264-style name (`ultrafast`…`veryslow`), it is normalized into the resolved encoder's namespace: NVENC → `fast`/`medium`/`slow` (or pass `p1`–`p7`), QSV → `veryfast`…`veryslow`, SVT-AV1 → a number `0`–`13`. Ignored for VP9/VAAPI/AMF/VideoToolbox. |
 | `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
+| `--skip-hardlinked` | bool | `false` | With `--inplace`, skip files whose hardlink count is >1. Transcoding replaces the inode, breaking the hardlink (e.g. to a torrent client's copy) and doubling disk usage — useful for ARR/seedbox setups. Overridden by `--force`. No effect without `--inplace`. |
 | `--src` | string | `.` | Root directory to scan recursively for media files. |
 | `--suffix` | string | `.smelt` | Filename suffix for outputs written alongside the source (`<name><suffix><ext>`). Ignored for `--inplace` and `--output-dir`. |
 | `--to` | string | _(keep source)_ | Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags HEVC as `hvc1`. Mutually exclusive with `--inplace`. |
@@ -183,6 +185,7 @@ Flags:
       --output-dir string        write output files to this directory instead of alongside source
       --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
+      --skip-hardlinked          with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
       --src string               source directory to scan (default ".")
       --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
       --to string                target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
@@ -322,6 +325,7 @@ uppercase and underscores. Flag precedence (highest to lowest):
 | `--preset` | `SMELT_PRESET` |
 | `--workers` | `SMELT_WORKERS` |
 | `--inplace` | `SMELT_INPLACE` |
+| `--skip-hardlinked` | `SMELT_SKIP_HARDLINKED` |
 | `--output-dir` | `SMELT_OUTPUT_DIR` |
 | `--profile` | `SMELT_PROFILE` |
 
