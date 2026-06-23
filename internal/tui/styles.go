@@ -11,6 +11,7 @@ var theme = struct {
 	StatusErr  lipgloss.Style
 	StatusAct  lipgloss.Style
 	StatusPend lipgloss.Style
+	StatusCxl  lipgloss.Style
 	Box        lipgloss.Style
 	LogBox     lipgloss.Style
 	Help       lipgloss.Style
@@ -36,6 +37,9 @@ var theme = struct {
 
 	StatusPend: lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#555555")),
+
+	StatusCxl: lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#B0883B")),
 
 	Box: lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

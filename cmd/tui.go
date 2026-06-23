@@ -14,9 +14,11 @@ import (
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Launch the interactive transcoding TUI",
-	Long: `Launch the interactive transcoding TUI. Scans the source directory and begins
-transcoding in parallel. Progress, worker status, and logs are displayed live.
-Press q or Ctrl+C to quit; active jobs are cancelled cleanly.`,
+	Long: `Launch the interactive transcoding TUI. Scans the source directory and opens an
+editable configure screen — adjust codec, CRF, preset, hwaccel, and workers, and
+see the concrete encoder that --hwaccel resolves to. Press enter to start; jobs
+then run in parallel with live progress, worker status, and logs. Press q or
+Ctrl+C to cancel running jobs cleanly and quit.`,
 	RunE: runTUI,
 }
 

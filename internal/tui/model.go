@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
@@ -25,6 +26,30 @@ type completeMsg struct {
 }
 type allDoneMsg struct{}
 
+// resolvedMsg carries the concrete encoder/backend the pre-flight probe picked,
+// tagged with the codec/hwaccel it was probed for so a stale result (from a
+// since-changed setting) can be ignored.
+type resolvedMsg struct{ encoder, backend, codec, hwaccel string }
+
+// ── editable pre-flight fields ─────────────────────────────────────────────────
+
+type confField int
+
+const (
+	fCodec confField = iota
+	fCRF
+	fPreset
+	fHWAccel
+	fWorkers
+	confFieldCount
+)
+
+var (
+	codecChoices   = []string{"h264", "h265", "av1", "vp9"}
+	presetChoices  = []string{"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}
+	hwaccelChoices = []string{"auto", "none", "nvenc", "qsv", "vaapi", "amf", "videotoolbox"}
+)
+
 // ── file item ────────────────────────────────────────────────────────────────
 
 type fileStatus int
@@ -34,7 +59,30 @@ const (
 	statusActive
 	statusDone
 	statusError
+	statusCancelled
 )
+
+// rendering budgets: bound the active-worker and log panels so the layout fits
+// short terminals; the file queue takes whatever height is left.
+const (
+	maxActiveRows = 6
+	maxLogLines   = 8
+)
+
+func (s fileStatus) label() string {
+	switch s {
+	case statusActive:
+		return "transcoding"
+	case statusDone:
+		return "done"
+	case statusError:
+		return "error"
+	case statusCancelled:
+		return "cancelled"
+	default:
+		return "pending"
+	}
+}
 
 type fileItem struct {
 	file    scanner.MediaFile
@@ -51,41 +99,41 @@ type listEntry struct {
 
 func (le listEntry) FilterValue() string { return le.name }
 func (le listEntry) Title() string       { return le.name }
-func (le listEntry) Description() string {
-	switch le.status {
-	case statusActive:
-		return "transcoding"
-	case statusDone:
-		return "done"
-	case statusError:
-		return "error"
-	default:
-		return "pending"
-	}
-}
+func (le listEntry) Description() string { return le.status.label() }
 
 // ── model ────────────────────────────────────────────────────────────────────
 
 type Model struct {
-	cfg       *config.Config
-	pool      *worker.Pool
-	files     []scanner.MediaFile
-	fileItems []fileItem
-	fileIndex map[string]int // path → index in fileItems
-	list      list.Model
-	logs      []string
-	events    chan tea.Msg
-	ctx       context.Context
-	done      int
-	errCount  int
-	width     int
-	height    int
-	quitting  bool
+	cfg        *config.Config
+	field      confField // focused field on the editable pre-flight screen
+	files      []scanner.MediaFile
+	fileItems  []fileItem
+	fileIndex  map[string]int // path → index in fileItems
+	list       list.Model
+	logs       []string
+	events     chan tea.Msg
+	ctx        context.Context
+	cancel     context.CancelFunc
+	encoder    string // resolved concrete encoder, for the pre-flight screen
+	backend    string // resolved hw backend ("" = software)
+	resolved   bool   // the encoder probe has returned
+	done       int
+	errCount   int
+	width      int
+	height     int
+	started    bool // user confirmed the pre-flight screen; pool is running
+	quitting   bool
+	cancelling bool // q/Ctrl+C pressed: draining in-flight work before exit
+	finished   bool // the worker pool drained on its own (allDoneMsg seen)
+	showHelp   bool
 }
 
 func New(cfg *config.Config, files []scanner.MediaFile, ctx context.Context) Model {
-	pool := worker.New(cfg)
 	events := make(chan tea.Msg, len(files)*4+4)
+
+	// Own a cancellable child of the caller's context so an in-app quit (q/Q)
+	// can cancel in-flight ffmpeg children, not just an external SIGINT.
+	ctx, cancel := context.WithCancel(ctx)
 
 	fileItems := make([]fileItem, len(files))
 	fileIndex := make(map[string]int, len(files))
@@ -106,50 +154,71 @@ func New(cfg *config.Config, files []scanner.MediaFile, ctx context.Context) Mod
 	l.Title = "file queue"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
+	l.SetShowHelp(false) // we render our own status bar
 
 	return Model{
 		cfg:       cfg,
-		pool:      pool,
 		files:     files,
 		fileItems: fileItems,
 		fileIndex: fileIndex,
 		list:      l,
 		events:    events,
 		ctx:       ctx,
+		cancel:    cancel,
 	}
 }
 
 // ── bubbletea interface ───────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
+	// Probe the encoder up front so the pre-flight screen can show the concrete
+	// choice. The pool isn't started until the user confirms (see runPool).
+	return m.resolveCmd()
+}
+
+// resolveCmd probes the hardware encoder off the UI goroutine, for the current
+// codec/hwaccel. Repeated probes are deduped by ffmpeg's internal cache.
+func (m Model) resolveCmd() tea.Cmd {
+	codec, hw := m.cfg.Codec, m.cfg.HWAccel
+	return func() tea.Msg {
+		enc, be := ffmpeg.ResolveEncoder(m.ctx, codec, hw)
+		return resolvedMsg{encoder: enc, backend: be, codec: codec, hwaccel: hw}
+	}
+}
+
+// runPool builds the worker pool from the (possibly edited) config and feeds its
+// events onto m.events. Called once, when the user starts the run. The pool is
+// created here, not in New, so edits to workers/codec/hwaccel take effect.
+func (m Model) runPool() {
+	pool := worker.New(m.cfg)
 	go func() {
-		m.pool.RunWithCallbacks(m.ctx, m.files,
+		pool.RunWithCallbacks(m.ctx, m.files,
 			func(ev ffmpeg.ProgressEvent) { m.events <- progressMsg{ev: ev} },
 			func(f scanner.MediaFile, err error) { m.events <- completeMsg{file: f, err: err} },
 		)
 		m.events <- allDoneMsg{}
 	}()
-	return listenForEvent(m.events)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		}
+		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		listH := m.height/2 - 2
-		if listH < 4 {
-			listH = 4
+		// List text sits inside a bordered+padded box; leave room for both
+		// (2 border + 2 padding) so its rows never wrap against the frame.
+		m.list.SetSize(m.panelWidth()-4, m.listHeight())
+		return m, nil
+
+	case resolvedMsg:
+		// Ignore a probe result for a setting the user has since changed.
+		if msg.codec == m.cfg.Codec && msg.hwaccel == m.cfg.HWAccel {
+			m.encoder, m.backend, m.resolved = msg.encoder, msg.backend, true
 		}
-		m.list.SetSize(m.width-4, listH)
 		return m, nil
 
 	case progressMsg:
@@ -159,7 +228,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.fileItems[idx].status = statusActive
 		m.fileItems[idx].percent = msg.ev.Percent
-		// Update list entry status
 		m.list.SetItem(idx, listEntry{
 			name:   filepath.Base(msg.ev.FilePath),
 			status: statusActive,
@@ -168,27 +236,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(setCmd, listenForEvent(m.events))
 
 	case completeMsg:
-		idx, ok := m.fileIndex[msg.file.Path]
-		if !ok {
-			return m, listenForEvent(m.events)
-		}
-		name := filepath.Base(msg.file.Path)
-		if msg.err != nil {
-			m.fileItems[idx].status = statusError
-			m.errCount++
-			m.logs = append(m.logs, fmt.Sprintf("✗ %s: %v", name, msg.err))
-			m.list.SetItem(idx, listEntry{name: name, status: statusError})
-		} else {
-			m.fileItems[idx].status = statusDone
-			m.fileItems[idx].percent = 1
-			_ = m.fileItems[idx].prog.SetPercent(1)
-			m.done++
-			m.logs = append(m.logs, fmt.Sprintf("✓ %s", name))
-			m.list.SetItem(idx, listEntry{name: name, status: statusDone})
-		}
-		return m, listenForEvent(m.events)
+		return m.handleComplete(msg)
 
 	case allDoneMsg:
+		// While cancelling, allDone is the signal that every worker has stopped
+		// and cleaned up its transient artifact — only now is it safe to exit.
+		if m.cancelling {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// The pool finished on its own. It will never send another event, so we
+		// must NOT wait on the channel again — a later q must quit directly.
+		m.finished = true
 		m.logs = append(m.logs, fmt.Sprintf("all done — %d ok, %d failed", m.done, m.errCount))
 		return m, nil
 
@@ -211,6 +270,163 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The help overlay toggles from any phase and swallows other keys.
+	switch msg.String() {
+	case "?":
+		m.showHelp = !m.showHelp
+		return m, nil
+	case "esc":
+		m.showHelp = false
+		return m, nil
+	}
+	if m.showHelp {
+		return m, nil
+	}
+	if !m.started {
+		return m.handlePreflightKey(msg)
+	}
+	return m.handleRunningKey(msg)
+}
+
+// handlePreflightKey runs on the editable pre-flight screen, before any job has
+// started: navigate fields, adjust values, then start or abort.
+func (m Model) handlePreflightKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "s":
+		m.started = true
+		m.runPool()
+		return m, listenForEvent(m.events)
+	case "q", "ctrl+c":
+		m.quitting = true // nothing running yet; just exit
+		return m, tea.Quit
+	case "down", "j", "tab":
+		m.field = (m.field + 1) % confFieldCount
+		return m, nil
+	case "up", "k", "shift+tab":
+		m.field = (m.field - 1 + confFieldCount) % confFieldCount
+		return m, nil
+	case "left", "h":
+		return m.adjust(-1)
+	case "right", "l":
+		return m.adjust(+1)
+	}
+	return m, nil
+}
+
+// adjust changes the focused field by delta and, when the codec or hwaccel
+// changed, re-probes so the resolved-encoder line stays accurate.
+func (m Model) adjust(delta int) (tea.Model, tea.Cmd) {
+	reResolve := false
+	switch m.field {
+	case fCodec:
+		m.cfg.Codec = cycle(codecChoices, m.cfg.Codec, delta)
+		reResolve = true
+	case fCRF:
+		m.cfg.CRF = clamp(m.cfg.CRF+delta, 0, 51)
+	case fPreset:
+		m.cfg.Preset = cycle(presetChoices, m.cfg.Preset, delta)
+	case fHWAccel:
+		m.cfg.HWAccel = cycle(hwaccelChoices, m.cfg.HWAccel, delta)
+		reResolve = true
+	case fWorkers:
+		m.cfg.Workers = clamp(m.cfg.Workers+delta, 1, 256)
+	}
+	if reResolve {
+		m.resolved, m.encoder, m.backend = false, "", ""
+		return m, m.resolveCmd()
+	}
+	return m, nil
+}
+
+// cycle returns the choice delta steps from cur (wrapping). An unknown cur
+// starts from the first choice.
+func cycle(choices []string, cur string, delta int) string {
+	idx := 0
+	for i, c := range choices {
+		if c == cur {
+			idx = i
+			break
+		}
+	}
+	n := len(choices)
+	return choices[((idx+delta)%n+n)%n]
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// handleRunningKey runs once the pool has started.
+func (m Model) handleRunningKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		// Nothing left running — quit immediately. The pool already drained, so
+		// there is no further event to wait for (waiting here would hang).
+		if m.finished {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		if m.cancelling {
+			return m, nil // already draining; ignore repeat presses
+		}
+		// Graceful: cancel in-flight ffmpeg, then wait for the worker goroutine
+		// to drain (allDoneMsg) so partial artifacts are cleaned up before exit.
+		m.cancelling = true
+		m.cancel()
+		m.logs = append(m.logs, "cancelling — waiting for active jobs to stop…")
+		return m, listenForEvent(m.events)
+
+	case "Q":
+		// Force-quit: cancel and exit immediately without waiting to drain.
+		m.cancel()
+		m.quitting = true
+		return m, tea.Quit
+	}
+
+	// Everything else (↑/↓, j/k, g/G, …) drives the file-queue list.
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleComplete(msg completeMsg) (tea.Model, tea.Cmd) {
+	idx, ok := m.fileIndex[msg.file.Path]
+	if !ok {
+		return m, listenForEvent(m.events)
+	}
+	name := filepath.Base(msg.file.Path)
+
+	switch {
+	case msg.err == nil:
+		m.fileItems[idx].status = statusDone
+		m.fileItems[idx].percent = 1
+		_ = m.fileItems[idx].prog.SetPercent(1)
+		m.done++
+		m.logs = append(m.logs, fmt.Sprintf("✓ %s", name))
+		m.list.SetItem(idx, listEntry{name: name, status: statusDone})
+
+	case m.cancelling:
+		// A failure that arrives after the user asked to quit is a cancellation,
+		// not a real error — don't paint it red or inflate the error count.
+		m.fileItems[idx].status = statusCancelled
+		m.list.SetItem(idx, listEntry{name: name, status: statusCancelled})
+
+	default:
+		m.fileItems[idx].status = statusError
+		m.errCount++
+		m.logs = append(m.logs, fmt.Sprintf("✗ %s: %v", name, msg.err))
+		m.list.SetItem(idx, listEntry{name: name, status: statusError})
+	}
+	return m, listenForEvent(m.events)
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return ""
@@ -218,10 +434,15 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "initializing…\n"
 	}
+	if m.showHelp {
+		return m.helpView()
+	}
+	if !m.started {
+		return m.preflightView()
+	}
 
-	workerStr := fmt.Sprintf("workers: %d", m.cfg.Workers)
-	statsStr := fmt.Sprintf("files: %d/%d  errors: %d  %s",
-		m.done, len(m.files), m.errCount, workerStr)
+	statsStr := fmt.Sprintf("files: %d/%d  errors: %d  workers: %d",
+		m.done, len(m.files), m.errCount, m.cfg.Workers)
 
 	header := lipgloss.JoinHorizontal(lipgloss.Top,
 		theme.Title.Render("⚡ smelt"),
@@ -229,37 +450,182 @@ func (m Model) View() string {
 		theme.Subtitle.Render(statsStr),
 	)
 
-	sections := []string{header, "", theme.Box.Render(m.list.View()), ""}
+	// Force each panel to span the terminal; without an explicit width lipgloss
+	// shrinks a bordered box to its longest line, hugging the left edge.
+	cw := m.panelWidth() - 4 // content width inside border (2) + padding (2)
+	box := theme.Box.Width(cw)
+	logBox := theme.LogBox.Width(cw)
+
+	sections := []string{header, "", box.Render(m.list.View()), ""}
 
 	if active := m.renderActiveFiles(); active != "" {
-		sections = append(sections, theme.Box.Render(active), "")
+		sections = append(sections, box.Render(active), "")
 	}
 
-	sections = append(sections, theme.LogBox.Render(m.renderLogs()))
-	sections = append(sections, theme.Help.Render("q quit"))
+	sections = append(sections, logBox.Render(m.renderLogs()))
+	sections = append(sections, m.statusBar())
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
+func (m Model) statusBar() string {
+	if m.cancelling {
+		return theme.StatusCxl.Render("cancelling… (Q force-quit)")
+	}
+	return theme.Help.Render("q quit · Q force-quit · ↑↓/jk navigate · ? help")
+}
+
 func (m Model) renderActiveFiles() string {
 	var lines []string
+	overflow := 0
 	for _, fi := range m.fileItems {
-		if fi.status == statusActive {
-			lines = append(lines, renderActiveFile(fi))
+		if fi.status != statusActive {
+			continue
 		}
+		if len(lines) >= maxActiveRows {
+			overflow++
+			continue
+		}
+		lines = append(lines, renderActiveFile(fi))
+	}
+	if overflow > 0 {
+		lines = append(lines, theme.StatusPend.Render(fmt.Sprintf("  …and %d more", overflow)))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderLogs() string {
 	logs := m.logs
-	if len(logs) > 8 {
-		logs = logs[len(logs)-8:]
+	if len(logs) > maxLogLines {
+		logs = logs[len(logs)-maxLogLines:]
 	}
 	if len(logs) == 0 {
 		return "waiting for workers…"
 	}
 	return strings.Join(logs, "\n")
+}
+
+// panelWidth is the on-screen width of each panel: the terminal width minus a
+// one-column breathing margin on each side, floored so it never goes negative.
+func (m Model) panelWidth() int {
+	if m.width < 24 {
+		return 20
+	}
+	return m.width - 2
+}
+
+// listHeight budgets the file-queue panel: total terminal height minus the
+// fixed-size header, active-worker, log, and status-bar panels. The queue gets
+// the remainder, floored so it never collapses.
+func (m Model) listHeight() int {
+	const (
+		headerRows  = 2 // logo line + blank
+		statusRows  = 1
+		listBorders = 2 // rounded border top+bottom around the list
+	)
+	activeRows := maxActiveRows + 2 // worst-case active panel (rows + border)
+	logRows := maxLogLines + 2
+	h := m.height - headerRows - statusRows - listBorders - activeRows - logRows
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// preflightView is the editable pre-start screen: static context (src/output)
+// plus the adjustable encode settings, then start/abort.
+func (m Model) preflightView() string {
+	files := "files"
+	if len(m.files) == 1 {
+		files = "file"
+	}
+
+	// static context rows
+	static := func(k, v string) string {
+		return theme.StatusPend.Render(fmt.Sprintf("  %-9s", k)) + theme.FileLabel.Render(v)
+	}
+	// an editable row: ‹ value › with the focused field highlighted.
+	edit := func(f confField, k, v, suffix string) string {
+		focused := f == m.field
+		marker := "  "
+		ctrl := fmt.Sprintf("‹ %s ›", v)
+		if focused {
+			marker = theme.StatusAct.Render("▸ ")
+			ctrl = theme.StatusAct.Render(ctrl)
+		} else {
+			ctrl = theme.FileLabel.Render(ctrl)
+		}
+		return marker + theme.Subtitle.Render(fmt.Sprintf("%-9s", k)) + ctrl + theme.Subtitle.Render(suffix)
+	}
+
+	preset := m.cfg.Preset
+	if preset == "" {
+		preset = "—"
+	}
+
+	var b strings.Builder
+	b.WriteString(theme.Title.Render("⚡ smelt — configure"))
+	b.WriteString("\n\n")
+	b.WriteString(static("src", fmt.Sprintf("%s  (%d %s)", m.cfg.Src, len(m.files), files)) + "\n")
+	b.WriteString(static("output", m.outputSummary()) + "\n\n")
+	b.WriteString(edit(fCodec, "codec", m.cfg.Codec, "") + "\n")
+	b.WriteString(edit(fCRF, "crf", strconv.Itoa(m.cfg.CRF), "") + "\n")
+	b.WriteString(edit(fPreset, "preset", preset, "") + "\n")
+	b.WriteString(edit(fHWAccel, "hwaccel", m.cfg.HWAccel, "  → "+m.resolvedEncoder()) + "\n")
+	b.WriteString(edit(fWorkers, "workers", strconv.Itoa(m.cfg.Workers), "") + "\n")
+	b.WriteString("\n")
+	b.WriteString(theme.Help.Render("  [↑↓/tab] field   [←→] change   [enter] start   [q] abort   [?] help"))
+	// Center the card so it scales with the terminal instead of hugging the corner.
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, theme.Box.Render(b.String()))
+}
+
+// resolvedEncoder is the concrete encoder for the hwaccel row, or a placeholder
+// while the probe is in flight.
+func (m Model) resolvedEncoder() string {
+	if !m.resolved {
+		return "resolving…"
+	}
+	if m.backend == "" {
+		return m.encoder + " (software)"
+	}
+	return m.encoder
+}
+
+// outputSummary describes where finished files will land.
+func (m Model) outputSummary() string {
+	switch {
+	case m.cfg.InPlace:
+		return theme.StatusErr.Render("in place — replaces originals")
+	case m.cfg.OutputDir != "":
+		return m.cfg.OutputDir + "  (mirrored tree)"
+	case m.cfg.Container != "":
+		return "*" + m.cfg.Suffix + "." + m.cfg.Container + "  (alongside source)"
+	default:
+		return "*" + m.cfg.Suffix + ".<ext>  (alongside source, same container)"
+	}
+}
+
+func (m Model) helpView() string {
+	rows := [][2]string{
+		{"enter / s", "start the run (pre-flight screen only)"},
+		{"q / Ctrl+C", "cancel active jobs, wait for cleanup, then quit"},
+		{"Q", "force-quit immediately (cancels jobs, skips waiting)"},
+		{"↑ / k", "move selection up in the file queue"},
+		{"↓ / j", "move selection down in the file queue"},
+		{"?", "toggle this help"},
+		{"esc", "close this help"},
+	}
+	var b strings.Builder
+	b.WriteString(theme.Title.Render("⚡ smelt — keybindings"))
+	b.WriteString("\n\n")
+	for _, r := range rows {
+		b.WriteString(theme.StatusAct.Render(fmt.Sprintf("  %-12s", r[0])))
+		b.WriteString(theme.FileLabel.Render(r[1]))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(theme.Help.Render("press ? or esc to return"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, theme.Box.Render(b.String()))
 }
 
 // listenForEvent returns a Cmd that blocks until the next event arrives on ch.
