@@ -160,38 +160,123 @@ func containerArgs(spec EncodeSpec) []string {
 
 // rateControlArgs builds the video-encoder flags. Rate control differs per
 // encoder: x264/x265/SVT-AV1 take -crf (+ -preset); libvpx-vp9 needs -b:v 0
-// alongside -crf and has no string preset.
+// alongside -crf and has no string preset. The preset is translated into the
+// target encoder's namespace (see encoderPreset) rather than forwarded raw.
 func rateControlArgs(spec EncodeSpec) []string {
-	args := []string{"-c:v", videoEncoder(spec)}
+	enc := videoEncoder(spec)
+	args := []string{"-c:v", enc}
+	crf := strconv.Itoa(spec.CRF)
 	switch spec.Backend {
 	case "nvenc":
-		args = append(args, "-rc", "vbr", "-cq", strconv.Itoa(spec.CRF))
-		if spec.Preset != "" {
-			args = append(args, "-preset", spec.Preset)
-		}
+		args = append(args, "-rc", "vbr", "-cq", crf)
 	case "qsv":
-		args = append(args, "-global_quality", strconv.Itoa(spec.CRF))
-		if spec.Preset != "" {
-			args = append(args, "-preset", spec.Preset)
-		}
+		args = append(args, "-global_quality", crf)
 	case "vaapi":
-		args = append(args, "-rc_mode", "CQP", "-qp", strconv.Itoa(spec.CRF))
+		args = append(args, "-rc_mode", "CQP", "-qp", crf)
 	case "amf":
-		args = append(args, "-rc", "cqp", "-qp_i", strconv.Itoa(spec.CRF), "-qp_p", strconv.Itoa(spec.CRF))
+		args = append(args, "-rc", "cqp", "-qp_i", crf, "-qp_p", crf)
 	case "videotoolbox":
-		args = append(args, "-q:v", strconv.Itoa(spec.CRF))
+		args = append(args, "-q:v", crf)
 	default: // software
-		args = append(args, "-crf", strconv.Itoa(spec.CRF))
-		switch videoEncoder(spec) {
-		case "libx264", "libx265", "libsvtav1":
-			if spec.Preset != "" {
-				args = append(args, "-preset", spec.Preset)
-			}
-		case "libvpx-vp9":
+		args = append(args, "-crf", crf)
+		if enc == "libvpx-vp9" {
 			args = append(args, "-b:v", "0")
 		}
 	}
+	if p := encoderPreset(spec.Backend, enc, spec.Preset); p != "" {
+		args = append(args, "-preset", p)
+	}
 	return args
+}
+
+// encoderPreset maps a requested preset into the namespace the target encoder
+// accepts, returning "" to omit -preset (use the encoder default) when there is
+// no sensible mapping. ffmpeg rejects cross-family preset names — e.g. x264's
+// "superfast" on NVENC, or any name on SVT-AV1 which wants a number — so we
+// never forward an incompatible value.
+func encoderPreset(backend, encoder, preset string) string {
+	if preset == "" {
+		return ""
+	}
+	switch backend {
+	case "nvenc":
+		return nvencPreset(preset)
+	case "qsv":
+		return qsvPreset(preset)
+	case "":
+		switch encoder {
+		case "libx264", "libx265": // native x264-family namespace
+			return preset
+		case "libsvtav1": // wants an integer 0–13
+			if isNumeric(preset) {
+				return preset
+			}
+			return svtPreset(preset)
+		}
+	}
+	return "" // vaapi/amf/videotoolbox/vp9: no -preset
+}
+
+// nvencPreset maps x264-style speed names onto NVENC's named presets and passes
+// NVENC-native presets (p1–p7, hq, ll, …) through unchanged.
+func nvencPreset(p string) string {
+	switch p {
+	case "ultrafast", "superfast", "veryfast", "faster", "fast":
+		return "fast"
+	case "medium":
+		return "medium"
+	case "slow", "slower", "veryslow":
+		return "slow"
+	}
+	return p
+}
+
+// qsvPreset maps the two x264 names QSV lacks; the rest (veryfast…veryslow) are
+// already valid QSV presets.
+func qsvPreset(p string) string {
+	switch p {
+	case "ultrafast", "superfast":
+		return "veryfast"
+	}
+	return p
+}
+
+// svtPreset maps x264-style names to SVT-AV1 preset numbers (0 slowest – 13
+// fastest); an unknown name yields "" so the encoder uses its default.
+func svtPreset(p string) string {
+	switch p {
+	case "ultrafast":
+		return "12"
+	case "superfast":
+		return "11"
+	case "veryfast":
+		return "10"
+	case "faster":
+		return "9"
+	case "fast":
+		return "8"
+	case "medium":
+		return "6"
+	case "slow":
+		return "4"
+	case "slower":
+		return "3"
+	case "veryslow":
+		return "2"
+	}
+	return ""
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // codecAliases maps user-facing codec names to ffmpeg software encoders.
