@@ -36,6 +36,7 @@ Available Commands:
   transcode   Transcode media files in a directory
   tui         Launch the interactive transcoding TUI
   version     Print smelt version information
+  workflow    Generate a schedulable shell script for a transcode job
 
 Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
@@ -202,6 +203,61 @@ Global Flags:
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
+```
+
+---
+
+## `smelt workflow`
+
+Generates a self-contained, human-editable shell script that runs a `smelt
+transcode`. There is no separate workflow engine — the script *is* the workflow.
+It includes an overlap guard (`flock`) so scheduled runs never stack, and
+expands the resolved config (including any `--profile`) into explicit flags so
+the script doesn't depend on a config file at run time.
+
+### Synopsis
+
+Accepts every `smelt transcode` flag to define the job, plus:
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `-o`, `--out` | string | _(stdout)_ | Write the script to this file and make it executable. |
+| `--name` | string | `smelt-workflow` | Name used in the script header and the `flock` lock file. |
+| `--schedule` | string | _(none)_ | Cron expression. Prints a ready-to-paste crontab line. Requires `--out`. |
+
+### Examples
+
+```bash
+# Print a workflow script to stdout
+smelt workflow --src /mnt/media --codec h265
+
+# Write an executable nightly job and show the crontab line to install
+smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
+```
+
+### `--help` output
+
+```
+Generate a self-contained, human-editable shell script that runs a smelt
+transcode. The script is plain — it IS the workflow; there is no separate engine.
+It includes an overlap guard (flock) so scheduled runs never stack.
+
+Accepts every 'smelt transcode' flag to define the job. With --out the script is
+written to a file and made executable; otherwise it is printed to stdout. With
+--schedule a ready-to-paste crontab line is printed (requires --out).
+
+Usage:
+  smelt workflow [flags]
+
+Examples:
+  smelt workflow --src /mnt/media --codec h265 -o nightly.sh
+  smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
+
+Flags:
+      --name string              workflow name, used in the script header and lock file
+  -o, --out string               write the script to this file (made executable); default stdout
+      --schedule string          cron expression to run the script on a timer, e.g. "0 3 * * *" (requires --out)
+  (plus all `smelt transcode` flags)
 ```
 
 ---
