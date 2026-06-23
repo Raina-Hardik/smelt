@@ -20,6 +20,13 @@ var codecBase = map[string]string{
 	"vp9":  "vp9",
 }
 
+// CodecName maps a codec alias to the ffprobe codec_name it produces (e.g.
+// h265 → "hevc"), so a transcode target can be compared against a file's
+// current video codec. Returns "" for an unknown alias.
+func CodecName(codec string) string {
+	return codecBase[strings.ToLower(codec)]
+}
+
 // hwPriority is the order --hwaccel=auto tries hardware backends.
 var hwPriority = []string{"nvenc", "qsv", "vaapi", "amf"}
 

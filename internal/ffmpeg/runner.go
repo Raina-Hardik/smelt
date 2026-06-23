@@ -376,6 +376,23 @@ func parseTime(line string) (time.Duration, bool) {
 	return d, true
 }
 
+// ProbeVideoCodec returns the codec_name of the first video stream (e.g.
+// "hevc", "h264", "av1", "vp9"), used to smart-skip files already in the target
+// codec. Errors propagate so callers can choose not to skip on probe failure.
+func ProbeVideoCodec(ctx context.Context, path string) (string, error) {
+	out, err := exec.CommandContext(ctx, "ffprobe",
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func probeDuration(ctx context.Context, path string) (time.Duration, error) {
 	out, err := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",

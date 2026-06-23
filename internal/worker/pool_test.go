@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,7 +63,7 @@ func TestPlanExcludesOwnOutputsAndExisting(t *testing.T) {
 
 	cfg := &config.Config{Suffix: ".smelt"}
 	files := []scanner.MediaFile{{Path: src}, {Path: own}, {Path: fresh}}
-	todo, skipped := Plan(files, cfg)
+	todo, skipped := Plan(context.Background(), files, cfg)
 
 	// a.mkv skipped (a.smelt.mkv exists), b.smelt.mkv skipped (own output), c.mkv kept.
 	if skipped != 2 || len(todo) != 1 || todo[0].Path != fresh {
@@ -76,17 +77,43 @@ func TestPlanForceKeepsExisting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a.smelt.mkv"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	todo, skipped := Plan([]scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true})
+	todo, skipped := Plan(context.Background(), []scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true})
 	if skipped != 0 || len(todo) != 1 {
 		t.Errorf("with --force: (todo %d, skipped %d), want (1, 0)", len(todo), skipped)
 	}
 }
 
-func TestPlanInplacePassesThrough(t *testing.T) {
-	files := []scanner.MediaFile{{Path: "/x/a.mkv"}, {Path: "/x/b.smelt.mkv"}}
-	todo, skipped := Plan(files, &config.Config{Suffix: ".smelt", InPlace: true})
-	if skipped != 0 || len(todo) != 2 {
-		t.Errorf("inplace passthrough: (todo %d, skipped %d), want (2, 0)", len(todo), skipped)
+// In --inplace mode, files already in the target codec are skipped; others kept.
+func TestPlanInplaceSmartSkip(t *testing.T) {
+	cfg := &config.Config{Codec: "h265", InPlace: true} // target codec_name "hevc"
+	files := []scanner.MediaFile{{Path: "/x/already.mkv"}, {Path: "/x/old.mkv"}, {Path: "/x/broken.mkv"}}
+	probe := func(p string) (string, error) {
+		switch p {
+		case "/x/already.mkv":
+			return "hevc", nil // matches target → skip
+		case "/x/old.mkv":
+			return "h264", nil // different → keep
+		default:
+			return "", errors.New("probe failed") // unknown → keep
+		}
+	}
+	todo, skipped := planInplace(files, cfg, probe)
+	if skipped != 1 || len(todo) != 2 {
+		t.Fatalf("smart-skip: (todo %d, skipped %d), want (2, 1)", len(todo), skipped)
+	}
+	if todo[0].Path != "/x/old.mkv" || todo[1].Path != "/x/broken.mkv" {
+		t.Errorf("kept the wrong files: %v", todo)
+	}
+}
+
+// --force overrides smart-skip and keeps everything, without probing.
+func TestPlanInplaceForceKeepsAll(t *testing.T) {
+	cfg := &config.Config{Codec: "h265", InPlace: true, Force: true}
+	files := []scanner.MediaFile{{Path: "/x/a.mkv"}, {Path: "/x/b.mkv"}}
+	probed := false
+	todo, skipped := planInplace(files, cfg, func(string) (string, error) { probed = true; return "hevc", nil })
+	if skipped != 0 || len(todo) != 2 || probed {
+		t.Errorf("force: (todo %d, skipped %d, probed %v), want (2, 0, false)", len(todo), skipped, probed)
 	}
 }
 
