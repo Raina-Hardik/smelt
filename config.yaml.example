@@ -31,7 +31,12 @@ transcode:
   crf: 23
 
   # ffmpeg encoding preset: ultrafast | fast | medium | slow | veryslow
+  # Normalized into the resolved encoder's namespace (e.g. nvenc, svt-av1).
   preset: medium
+
+  # Hardware acceleration: auto | none | nvenc | qsv | vaapi | amf | videotoolbox
+  # "auto" probes for a usable GPU encoder and falls back to software.
+  hwaccel: auto
 
   # Audio codec: copy | aac | opus | mp3 | ac3 | flac
   # "copy" stream-copies the audio untouched; others re-encode.
@@ -42,14 +47,26 @@ transcode:
 
   # Replace original file after a confirmed successful transcode.
   # WARNING: the original is unrecoverable after this operation.
+  # Files already in the target codec are skipped (override with force: true).
   inplace: false
+
+  # With inplace, skip files hardlinked elsewhere (transcoding would break the
+  # link and double disk usage). Useful for ARR/seedbox setups.
+  skip_hardlinked: false
+
+  # Re-transcode even when a file is already up to date (disables all skipping).
+  force: false
+
+  # Target container/format: mp4 | mkv | webm | ... Empty keeps the source
+  # container. Changes the muxer only, not the codec. Exclusive with inplace.
+  to: ""
 
   # Write output files to this directory instead of alongside the source.
   # The directory must exist. Mutually exclusive with inplace: true.
   output_dir: ""
 
-  # Temporary filename suffix applied during an active transcode.
-  # Removed on success; triggers cleanup on failure.
+  # Output filename suffix for files written alongside the source
+  # (<name><suffix><ext>). Ignored for inplace and output_dir.
   suffix: ".smelt"
 
 # Named profiles — apply with: smelt transcode --profile <name>

@@ -30,10 +30,16 @@ transcode:
   ext: [mkv, mp4, avi]        # []string — extensions to match, no leading dot
   codec: h265                 # string — h264 | h265 | av1 | vp9
   crf: 23                     # int    — constant rate factor, 0–51
-  preset: medium              # string — ffmpeg preset identifier
+  preset: medium              # string — encoding preset (normalized per encoder)
+  hwaccel: auto               # string — auto | none | nvenc | qsv | vaapi | amf | videotoolbox
+  audio_codec: copy           # string — copy | aac | opus | mp3 | ac3 | flac
+  audio_bitrate: ""           # string — e.g. 192k; only when re-encoding audio
   inplace: false              # bool   — replace original after successful transcode
+  skip_hardlinked: false      # bool   — with inplace, skip hardlinked files
+  force: false                # bool   — re-transcode even when already up to date
+  to: ""                      # string — target container (mp4|mkv|webm|…); empty keeps source
   output_dir: ""              # string — redirect output here; empty = alongside source
-  suffix: ".smelt"            # string — temp filename suffix during active transcode
+  suffix: ".smelt"            # string — output filename suffix (alongside source)
 
 profiles:
   web:
@@ -101,9 +107,9 @@ smelt:
 | CLI flag | `--log-format` |
 | Env var | `SMELT_LOG_FORMAT` |
 
-`auto` selects `pretty` (colorized, human-readable) when stdout is a TTY, and
-`json` (newline-delimited JSON objects) otherwise. Use `json` explicitly when
-piping to log aggregators.
+`auto` selects `pretty` (colorized, human-readable) when stderr is a TTY, and
+`json` (newline-delimited JSON objects) otherwise. Logs are written to stderr;
+use `json` explicitly when piping to log aggregators.
 
 ```yaml
 smelt:
@@ -211,14 +217,71 @@ transcode:
 | CLI flag | `--preset` |
 | Env var | `SMELT_PRESET` |
 
-ffmpeg encoding preset. Faster presets encode quicker at the cost of larger
-output files at the same CRF. Valid H.264/H.265 presets from fastest to
+Encoding preset (speed vs. size at a given CRF). x264/x265 presets, fastest to
 slowest: `ultrafast`, `superfast`, `veryfast`, `faster`, `fast`, `medium`,
-`slow`, `slower`, `veryslow`.
+`slow`, `slower`, `veryslow`. The value is **normalized into the resolved
+encoder's namespace** so it never breaks a hardware encode: NVENC → `fast`/
+`medium`/`slow` (or pass `p1`–`p7`), QSV → `veryfast`…`veryslow`, SVT-AV1 → a
+number `0`–`13`. Ignored for VP9/VAAPI/AMF/VideoToolbox.
 
 ```yaml
 transcode:
   preset: slow
+```
+
+#### `transcode.hwaccel`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `auto` |
+| Valid values | `auto` \| `none` \| `nvenc` \| `qsv` \| `vaapi` \| `amf` \| `videotoolbox` |
+| CLI flag | `--hwaccel` |
+| Env var | `SMELT_HWACCEL` |
+
+Hardware-accelerated encoding. `auto` *functionally probes* for a usable GPU
+encoder for the target codec (running a tiny test encode — compiled-in is not
+enough) and falls back to software; `none` forces software. An explicit backend
+that turns out unusable also falls back. The chosen encoder is logged at start.
+
+```yaml
+transcode:
+  hwaccel: auto
+```
+
+#### `transcode.audio_codec`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `copy` |
+| Valid values | `copy` \| `aac` \| `opus` \| `mp3` \| `ac3` \| `flac` |
+| CLI flag | `--audio-codec` |
+| Env var | `SMELT_AUDIO_CODEC` |
+
+`copy` stream-copies the audio untouched (no re-encode). Any other value
+re-encodes (`opus` → `libopus`, `mp3` → `libmp3lame`, etc.).
+
+```yaml
+transcode:
+  audio_codec: copy
+```
+
+#### `transcode.audio_bitrate`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `""` (encoder default) |
+| CLI flag | `--audio-bitrate` |
+| Env var | `SMELT_AUDIO_BITRATE` |
+
+Target audio bitrate when re-encoding, e.g. `192k`. Ignored when
+`audio_codec: copy`.
+
+```yaml
+transcode:
+  audio_bitrate: 192k
 ```
 
 #### `transcode.inplace`
@@ -234,9 +297,67 @@ When `true`, atomically replaces the original file with the transcoded output
 after a confirmed successful ffmpeg exit. The original is **unrecoverable**
 after this operation. Consider combining with a `--dry-run` pass first.
 
+Files **already in the target codec are skipped** (probed with `ffprobe`),
+making in-place runs idempotent. Override with `force: true`.
+
 ```yaml
 transcode:
   inplace: false
+```
+
+#### `transcode.skip_hardlinked`
+
+| Attribute | Value |
+|---|---|
+| Type | `bool` |
+| Default | `false` |
+| CLI flag | `--skip-hardlinked` |
+| Env var | `SMELT_SKIP_HARDLINKED` |
+
+With `inplace: true`, skip files whose hardlink count is greater than one.
+Transcoding replaces the inode, which breaks the hardlink (e.g. to a torrent
+client's copy) and doubles disk usage — useful for ARR/seedbox setups. No effect
+without `inplace`. Overridden by `force`.
+
+```yaml
+transcode:
+  skip_hardlinked: true
+```
+
+#### `transcode.force`
+
+| Attribute | Value |
+|---|---|
+| Type | `bool` |
+| Default | `false` |
+| CLI flag | `--force` |
+| Env var | `SMELT_FORCE` |
+
+Re-transcode even when a file is already up to date. Disables all skipping:
+normal runs otherwise skip existing outputs (and smelt's own `<suffix>` files);
+in-place runs otherwise skip files already in the target codec.
+
+```yaml
+transcode:
+  force: false
+```
+
+#### `transcode.to`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `""` (keep source container) |
+| CLI flag | `--to` |
+| Env var | `SMELT_TO` |
+
+Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the
+container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags
+HEVC as `hvc1`. Mutually exclusive with `inplace`.
+
+```yaml
+transcode:
+  to: mp4
 ```
 
 #### `transcode.output_dir`
@@ -263,16 +384,17 @@ transcode:
 |---|---|
 | Type | `string` |
 | Default | `.smelt` |
-| CLI flag | _(config only)_ |
+| CLI flag | `--suffix` |
 | Env var | `SMELT_SUFFIX` |
 
-Temporary filename suffix applied during an active transcode. The file is
-renamed to remove this suffix on success, or deleted on failure. Prevents
-partial output files from being mistaken for complete ones.
+Filename suffix for outputs written alongside the source (`<name><suffix><ext>`),
+e.g. `movie.smelt.mkv`. Ignored for `inplace` and `output_dir`. (During encoding
+ffmpeg writes to a transient `<name>.transcoded<ext>`, which is renamed to the
+final name on success and deleted on any failure.)
 
 ```yaml
 transcode:
-  suffix: .tmp
+  suffix: .smelt
 ```
 
 ---

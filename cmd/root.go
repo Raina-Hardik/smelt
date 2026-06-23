@@ -23,8 +23,8 @@ var rootCmd = &cobra.Command{
 	Long: `Smelt is a highly parallel, ffmpeg-powered media transcoding CLI and TUI.
 
 It scans a source directory, applies configured codec targets, and transcodes
-files concurrently — with live progress in the TUI or structured log output
-in daemon and pipe mode.`,
+files concurrently — with live progress in the TUI, structured logs on the CLI,
+or a schedulable script via 'smelt workflow'.`,
 	SilenceUsage: true,
 }
 

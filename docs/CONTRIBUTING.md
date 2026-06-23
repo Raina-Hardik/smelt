@@ -10,10 +10,10 @@ contribute code or documentation.
 
 | Tool | Minimum version | Purpose |
 |---|---|---|
-| Go | 1.23 | Build and test |
+| Go | 1.26 | Build and test |
 | ffmpeg + ffprobe | 4.4 | Runtime dependency for tests and manual testing |
 | git | 2.30 | Version control |
-| golangci-lint | 1.57 | Linting (optional but recommended) |
+| golangci-lint | 2.x | Linting (config is `.golangci.yml`, schema version 2) |
 
 Install ffmpeg on common platforms:
 
@@ -46,8 +46,8 @@ go mod download
 # Development build
 go build -o smelt .
 
-# With version injection
-go build -ldflags="-X main.version=v0.2.0-dev" -o smelt .
+# With version injection (note: `version` lives in package cmd, not main)
+go build -ldflags="-X github.com/Raina-Hardik/smelt/cmd.version=v0.8.0-dev" -o smelt .
 ```
 
 ---
