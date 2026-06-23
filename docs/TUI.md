@@ -1,11 +1,54 @@
 # smelt TUI Reference
 
 The interactive TUI is launched with `smelt tui`. It accepts the same source,
-codec, and worker flags as `smelt transcode` and begins processing immediately.
+codec, and worker flags as `smelt transcode`. On launch it scans the source and
+opens a **pre-flight screen**; transcoding begins only once you confirm.
 
 ---
 
-## Layout
+## Pre-flight screen
+
+Before any job starts, smelt opens an editable **configure** screen. It shows
+the static context (source + output target) and the encode settings as
+adjustable controls, so you can tweak the run without restarting from the CLI.
+It also surfaces the concrete encoder that `--hwaccel` resolved to (e.g.
+`hevc_nvenc` vs. a software fallback), which is otherwise invisible until jobs
+run.
+
+```
+┌──────────────────────────────────────────────────────┐
+│ ⚡ smelt — configure                                   │
+│                                                        │
+│   src       ./testdata  (4 files)                      │
+│   output    *.smelt.<ext>  (alongside source, …)       │
+│                                                        │
+│ ▸ codec     ‹ h265 ›                                   │
+│   crf       ‹ 23 ›                                     │
+│   preset    ‹ medium ›                                 │
+│   hwaccel   ‹ auto › → hevc_nvenc                      │
+│   workers   ‹ 16 ›                                     │
+│                                                        │
+│   [↑↓/tab] field  [←→] change  [enter] start  [q] abort│
+└──────────────────────────────────────────────────────┘
+```
+
+| Key | Action |
+|---|---|
+| `↑`/`↓`, `k`/`j`, `tab`/`shift+tab` | Move between fields (`▸` marks the focused one) |
+| `←`/`→`, `h`/`l` | Change the focused field's value |
+| `enter` / `s` | Start transcoding with the shown settings |
+| `q` / `Ctrl+C` | Abort without touching any files |
+
+Editable fields: **codec** (`h264`/`h265`/`av1`/`vp9`), **crf** (0–51),
+**preset**, **hwaccel** (`auto`/`none`/backend), **workers**. Changing codec or
+hwaccel re-probes; the `hwaccel` row reads `resolving…` until the probe returns.
+Each field maps 1:1 to its CLI flag — the screen adds no behavior the flags
+can't express. For a destructive `--inplace` run, the confirmation prompt still
+happens on the normal terminal *before* this screen.
+
+---
+
+## Layout (while running)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -34,7 +77,7 @@ codec, and worker flags as `smelt transcode` and begins processing immediately.
 │  waiting for workers…                                                   │
 │                                                                         │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  q quit   ↑↓/jk navigate   p pause   ? help                           │  ← Status bar
+│  q quit · Q force-quit · ↑↓/jk navigate · ? help                       │  ← Status bar
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,6 +105,7 @@ A scrollable list of all discovered media files and their current status.
 | `[transcoding]` | Currently being processed by ffmpeg |
 | `[done]` | Transcoded successfully |
 | `[error]` | ffmpeg exited non-zero; details in the Log panel |
+| `[cancelled]` | Stopped before finishing because the run was cancelled (`q`/`Q`) |
 
 Navigate with `↑`/`↓` or `j`/`k`. The selected file is highlighted.
 
@@ -98,12 +142,17 @@ Always-visible keybinding reminder at the bottom of the screen.
 
 | Key | Action |
 |---|---|
-| `q` / `Ctrl+C` | Quit smelt. Active ffmpeg processes are cancelled via context cancellation and waited on before exit. |
-| `Q` | Force-quit immediately. Active ffmpeg processes receive SIGKILL. Output files in progress are deleted. |
+| `enter` / `s` | (Pre-flight only) Start transcoding. |
+| `q` / `Ctrl+C` | On the pre-flight screen, abort without touching any files. While running: cancel the run. In-flight ffmpeg processes are killed via context cancellation; smelt then waits for each worker to remove its partial `.transcoded` artifact before exiting. Files that hadn't finished show as `[cancelled]`, not `[error]`. |
+| `Q` | Force-quit immediately. In-flight ffmpeg processes are killed, but smelt exits without waiting, so a partial `.transcoded` artifact from a killed job may be left behind. |
 | `↑` / `k` | Move selection up in the File Queue panel |
 | `↓` / `j` | Move selection down in the File Queue panel |
-| `p` | Pause / resume the job queue. Does not interrupt actively running ffmpeg jobs; prevents new jobs from starting. |
-| `?` | Toggle a help overlay showing all keybindings |
+| `?` / `esc` | Toggle / close a help overlay showing all keybindings |
+
+> **Not yet implemented:** `p` pause/resume. It requires the worker pool to gate
+> the start of new jobs (without interrupting running ffmpeg). Tracked for a
+> follow-up; until it ships it is intentionally absent from this screen so the
+> help stays in lockstep with the code (Help-Driven Development).
 
 ---
 
@@ -126,12 +175,15 @@ All `smelt transcode` flags except `--dry-run` are accepted.
 
 ## Quitting
 
-Pressing `q` or `Ctrl+C` sends a cancellation signal to the worker pool.
-Active ffmpeg processes receive the OS signal mapped from Go's
-`context.Context` cancellation (SIGKILL on Linux). Partial output files
-(identifiable by the `.smelt` suffix) are automatically removed.
+Pressing `q` or `Ctrl+C` cancels the run's `context.Context`, which kills
+active ffmpeg children (`exec.CommandContext` sends SIGKILL). smelt then waits
+for the worker pool to drain — each cancelled job deletes its transient
+`.transcoded` artifact — before exiting. Already-finished `.smelt` outputs are
+kept; files that were still in flight are marked `[cancelled]`.
 
-Press `Q` to skip the clean-shutdown wait and exit immediately.
+Press `Q` to skip that drain and exit immediately. ffmpeg is still killed, but
+because smelt does not wait, a partial `.transcoded` file from an in-flight job
+may remain on disk.
 
 ---
 
