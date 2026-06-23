@@ -113,7 +113,7 @@ Flags:
       --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
       --inplace                  replace original file after successful transcode
       --output-dir string        write output files to this directory instead of alongside source
-      --preset string            ffmpeg encoding preset (default "medium")
+      --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
       --src string               source directory to scan (default ".")
       --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
@@ -140,7 +140,7 @@ Global Flags:
 | `--hwaccel` | string | `auto` | Hardware acceleration backend: `auto`, `none`, `nvenc`, `qsv`, `vaapi`, `amf`, `videotoolbox`. `auto` functionally probes for a usable GPU encoder for the target codec and falls back to software; an explicit backend that isn't usable also falls back. The chosen encoder is logged. |
 | `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
-| `--preset` | string | `medium` | ffmpeg encoding preset. Faster presets trade quality for speed. Common values: `ultrafast`, `fast`, `medium`, `slow`, `veryslow`. Applied to x264/x265/SVT-AV1; ignored for VP9. |
+| `--preset` | string | `medium` | Encoding preset (speed/quality trade-off). Given an x264-style name (`ultrafast`…`veryslow`), it is normalized into the resolved encoder's namespace: NVENC → `fast`/`medium`/`slow` (or pass `p1`–`p7`), QSV → `veryfast`…`veryslow`, SVT-AV1 → a number `0`–`13`. Ignored for VP9/VAAPI/AMF/VideoToolbox. |
 | `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
 | `--src` | string | `.` | Root directory to scan recursively for media files. |
 | `--suffix` | string | `.smelt` | Filename suffix for outputs written alongside the source (`<name><suffix><ext>`). Ignored for `--inplace` and `--output-dir`. |
@@ -181,7 +181,7 @@ Flags:
       --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
       --inplace                  replace original file after successful transcode
       --output-dir string        write output files to this directory instead of alongside source
-      --preset string            ffmpeg encoding preset (default "medium")
+      --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
       --src string               source directory to scan (default ".")
       --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
