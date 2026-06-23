@@ -91,7 +91,7 @@ screen.
 │  waiting for workers…                                                   │
 │                                                                         │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  q quit · Q force-quit · ↑↓/jk navigate · ? help                       │  ← Status bar
+│  q quit · Q force-quit · p pause · ↑↓/jk navigate · ? help             │  ← Status bar
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -159,14 +159,10 @@ Always-visible keybinding reminder at the bottom of the screen.
 | `enter` / `s` | (Pre-flight only) Start transcoding. |
 | `q` / `Ctrl+C` | On the pre-flight screen, abort without touching any files. While running: cancel the run. In-flight ffmpeg processes are killed via context cancellation; smelt then waits for each worker to remove its partial `.transcoded` artifact before exiting. Files that hadn't finished show as `[cancelled]`, not `[error]`. |
 | `Q` | Force-quit immediately. In-flight ffmpeg processes are killed, but smelt exits without waiting, so a partial `.transcoded` artifact from a killed job may be left behind. |
+| `p` | Pause / resume the queue. Stops *starting* new jobs; jobs already running are not interrupted. The header shows `⏸ paused`. |
 | `↑` / `k` | Move selection up in the File Queue panel |
 | `↓` / `j` | Move selection down in the File Queue panel |
 | `?` / `esc` | Toggle / close a help overlay showing all keybindings |
-
-> **Not yet implemented:** `p` pause/resume. It requires the worker pool to gate
-> the start of new jobs (without interrupting running ffmpeg). Tracked for a
-> follow-up; until it ships it is intentionally absent from this screen so the
-> help stays in lockstep with the code (Help-Driven Development).
 
 ---
 
