@@ -106,6 +106,31 @@ func TestPlanInplaceSmartSkip(t *testing.T) {
 	}
 }
 
+// --skip-hardlinked drops files hardlinked elsewhere (regardless of codec);
+// single-link files still go through the normal codec check.
+func TestPlanInplaceSkipHardlinked(t *testing.T) {
+	cfg := &config.Config{Codec: "h265", InPlace: true, SkipHardlinked: true}
+	files := []scanner.MediaFile{
+		{Path: "/x/linked.mkv", Links: 2}, // hardlinked → skip even though h264
+		{Path: "/x/solo.mkv", Links: 1},   // single link, h264 → keep
+	}
+	probe := func(string) (string, error) { return "h264", nil }
+	todo, skipped := planInplace(files, cfg, probe)
+	if skipped != 1 || len(todo) != 1 || todo[0].Path != "/x/solo.mkv" {
+		t.Fatalf("skip-hardlinked: (todo %v, skipped %d), want ([solo], 1)", todo, skipped)
+	}
+}
+
+// Without the flag, a hardlinked file is transcoded normally.
+func TestPlanInplaceHardlinkedKeptByDefault(t *testing.T) {
+	cfg := &config.Config{Codec: "h265", InPlace: true}
+	files := []scanner.MediaFile{{Path: "/x/linked.mkv", Links: 5}}
+	todo, skipped := planInplace(files, cfg, func(string) (string, error) { return "h264", nil })
+	if skipped != 0 || len(todo) != 1 {
+		t.Errorf("default: (todo %d, skipped %d), want (1, 0)", len(todo), skipped)
+	}
+}
+
 // --force overrides smart-skip and keeps everything, without probing.
 func TestPlanInplaceForceKeepsAll(t *testing.T) {
 	cfg := &config.Config{Codec: "h265", InPlace: true, Force: true}

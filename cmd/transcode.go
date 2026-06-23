@@ -119,6 +119,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"replace original after transcode; files already in the target codec are skipped (use --force to re-encode)",
 	)
 	cmd.Flags().Bool(
+		"skip-hardlinked", false,
+		"with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)",
+	)
+	cmd.Flags().Bool(
 		"force", false,
 		"re-transcode even if the output file already exists",
 	)
@@ -158,6 +162,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.hwaccel", "hwaccel"},
 		{"smelt.workers", "workers"},
 		{"transcode.inplace", "inplace"},
+		{"transcode.skip_hardlinked", "skip-hardlinked"},
 		{"transcode.force", "force"},
 		{"transcode.output_dir", "output-dir"},
 		{"transcode.suffix", "suffix"},

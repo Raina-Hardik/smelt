@@ -200,6 +200,12 @@ func planInplace(files []scanner.MediaFile, cfg *config.Config, probe func(strin
 	}
 	target := ffmpeg.CodecName(cfg.Codec)
 	for _, f := range files {
+		// Transcoding a hardlinked file breaks the link (new inode) and doubles
+		// disk usage; skip it when asked so seeded/deduped libraries stay intact.
+		if cfg.SkipHardlinked && f.Links > 1 {
+			skipped++
+			continue
+		}
 		if target != "" {
 			if cur, err := probe(f.Path); err == nil && cur == target {
 				skipped++

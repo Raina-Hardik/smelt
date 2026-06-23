@@ -19,19 +19,20 @@ type Config struct {
 	LogFormat string
 
 	// transcode section
-	Src       string
-	Ext       []string
-	Codec     string
-	CRF       int
-	Preset    string
-	HWAccel   string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
-	InPlace   bool
-	Force     bool   // re-transcode even when the output already exists
-	Container string // --to: target container/format (e.g. mp4); empty keeps source
-	OutputDir string
-	Suffix    string
-	Profile   string
-	ExtraArgs []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
+	Src            string
+	Ext            []string
+	Codec          string
+	CRF            int
+	Preset         string
+	HWAccel        string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
+	InPlace        bool
+	SkipHardlinked bool   // --inplace: skip files hardlinked elsewhere (avoid breaking the link)
+	Force          bool   // re-transcode even when the output already exists
+	Container      string // --to: target container/format (e.g. mp4); empty keeps source
+	OutputDir      string
+	Suffix         string
+	Profile        string
+	ExtraArgs      []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
 
 	// CLI-only flags (not in config.yaml)
 	DryRun    bool
@@ -62,18 +63,19 @@ func Load() *Config {
 		LogLevel:  viper.GetString("smelt.log_level"),
 		LogFormat: viper.GetString("smelt.log_format"),
 
-		Src:       viper.GetString("transcode.src"),
-		Ext:       viper.GetStringSlice("transcode.ext"),
-		Codec:     viper.GetString("transcode.codec"),
-		CRF:       viper.GetInt("transcode.crf"),
-		Preset:    viper.GetString("transcode.preset"),
-		HWAccel:   hwaccel,
-		InPlace:   viper.GetBool("transcode.inplace"),
-		Force:     viper.GetBool("transcode.force"),
-		Container: strings.TrimPrefix(viper.GetString("transcode.to"), "."),
-		OutputDir: viper.GetString("transcode.output_dir"),
-		Suffix:    suffix,
-		Profile:   viper.GetString("transcode.profile"),
+		Src:            viper.GetString("transcode.src"),
+		Ext:            viper.GetStringSlice("transcode.ext"),
+		Codec:          viper.GetString("transcode.codec"),
+		CRF:            viper.GetInt("transcode.crf"),
+		Preset:         viper.GetString("transcode.preset"),
+		HWAccel:        hwaccel,
+		InPlace:        viper.GetBool("transcode.inplace"),
+		SkipHardlinked: viper.GetBool("transcode.skip_hardlinked"),
+		Force:          viper.GetBool("transcode.force"),
+		Container:      strings.TrimPrefix(viper.GetString("transcode.to"), "."),
+		OutputDir:      viper.GetString("transcode.output_dir"),
+		Suffix:         suffix,
+		Profile:        viper.GetString("transcode.profile"),
 		// Profile extra_args come first; CLI --ffmpeg-arg refine/append after.
 		ExtraArgs: append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
 
