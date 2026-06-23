@@ -46,7 +46,6 @@ const (
 
 var (
 	codecChoices   = []string{"h264", "h265", "av1", "vp9"}
-	presetChoices  = []string{"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}
 	hwaccelChoices = []string{"auto", "none", "nvenc", "qsv", "vaapi", "amf", "videotoolbox"}
 )
 
@@ -218,6 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ignore a probe result for a setting the user has since changed.
 		if msg.codec == m.cfg.Codec && msg.hwaccel == m.cfg.HWAccel {
 			m.encoder, m.backend, m.resolved = msg.encoder, msg.backend, true
+			m.cfg.Preset = reconcilePreset(m.backend, m.encoder, m.cfg.Preset)
 		}
 		return m, nil
 
@@ -325,7 +325,10 @@ func (m Model) adjust(delta int) (tea.Model, tea.Cmd) {
 	case fCRF:
 		m.cfg.CRF = clamp(m.cfg.CRF+delta, 0, 51)
 	case fPreset:
-		m.cfg.Preset = cycle(presetChoices, m.cfg.Preset, delta)
+		// Only the presets valid for the resolved encoder are offered.
+		if choices := ffmpeg.PresetsFor(m.backend, m.encoder); len(choices) > 0 {
+			m.cfg.Preset = cycle(choices, m.cfg.Preset, delta)
+		}
 	case fHWAccel:
 		m.cfg.HWAccel = cycle(hwaccelChoices, m.cfg.HWAccel, delta)
 		reResolve = true
@@ -351,6 +354,21 @@ func cycle(choices []string, cur string, delta int) string {
 	}
 	n := len(choices)
 	return choices[((idx+delta)%n+n)%n]
+}
+
+// reconcilePreset keeps the preset valid for a (re-)resolved encoder: an unset
+// encoder-preset namespace clears it; a now-invalid value snaps to the default.
+func reconcilePreset(backend, encoder, cur string) string {
+	choices := ffmpeg.PresetsFor(backend, encoder)
+	if len(choices) == 0 {
+		return "" // encoder takes no -preset
+	}
+	for _, c := range choices {
+		if c == cur {
+			return cur
+		}
+	}
+	return ffmpeg.DefaultPreset(backend, encoder)
 }
 
 func clamp(v, lo, hi int) int {
@@ -559,7 +577,9 @@ func (m Model) preflightView() string {
 	}
 
 	preset := m.cfg.Preset
-	if preset == "" {
+	if m.resolved && len(ffmpeg.PresetsFor(m.backend, m.encoder)) == 0 {
+		preset = "n/a"
+	} else if preset == "" {
 		preset = "—"
 	}
 

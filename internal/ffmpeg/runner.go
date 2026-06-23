@@ -267,6 +267,54 @@ func svtPreset(p string) string {
 	return ""
 }
 
+// Preset menus offered for each encoder family, fastest→slowest, plus a sane
+// default. The TUI shows only the set valid for the resolved encoder; CLI input
+// is still normalized by encoderPreset. nil means the encoder takes no -preset.
+var (
+	x264Presets  = []string{"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}
+	nvencPresets = []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7"}
+	qsvPresets   = []string{"veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}
+	svtPresets   = []string{"2", "4", "6", "8", "10", "12"}
+)
+
+// PresetsFor returns the presets smelt offers for a resolved encoder/backend, or
+// nil when the encoder takes no -preset (vp9, vaapi, amf, videotoolbox).
+func PresetsFor(backend, encoder string) []string {
+	switch backend {
+	case "nvenc":
+		return nvencPresets
+	case "qsv":
+		return qsvPresets
+	case "":
+		switch encoder {
+		case "libx264", "libx265":
+			return x264Presets
+		case "libsvtav1":
+			return svtPresets
+		}
+	}
+	return nil
+}
+
+// DefaultPreset is the preset to fall back to when the current one isn't valid
+// for a (newly resolved) encoder. "" when the encoder takes no preset.
+func DefaultPreset(backend, encoder string) string {
+	switch backend {
+	case "nvenc":
+		return "p5"
+	case "qsv":
+		return "medium"
+	case "":
+		switch encoder {
+		case "libx264", "libx265":
+			return "medium"
+		case "libsvtav1":
+			return "8"
+		}
+	}
+	return ""
+}
+
 func isNumeric(s string) bool {
 	if s == "" {
 		return false

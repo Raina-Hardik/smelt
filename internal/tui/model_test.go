@@ -215,6 +215,42 @@ func TestAdjustCodecReResolves(t *testing.T) {
 	}
 }
 
+func TestReconcilePresetSnapsToValid(t *testing.T) {
+	cases := []struct{ backend, encoder, cur, want string }{
+		{"nvenc", "hevc_nvenc", "medium", "p5"}, // x264 name invalid for nvenc → default
+		{"nvenc", "hevc_nvenc", "p3", "p3"},     // already valid → kept
+		{"", "libx265", "slow", "slow"},         // valid x264 preset kept
+		{"", "libvpx-vp9", "medium", ""},        // vp9 takes no preset → cleared
+		{"vaapi", "hevc_vaapi", "medium", ""},   // vaapi takes no preset → cleared
+		{"", "libsvtav1", "veryfast", "8"},      // svt name not in numeric menu → default
+	}
+	for _, c := range cases {
+		if got := reconcilePreset(c.backend, c.encoder, c.cur); got != c.want {
+			t.Errorf("reconcilePreset(%q,%q,%q) = %q, want %q", c.backend, c.encoder, c.cur, got, c.want)
+		}
+	}
+}
+
+// Resolving onto a HW encoder must snap an x264 preset to one that encoder
+// actually accepts, so the run can't fail with the preset the user sees.
+func TestResolvedMsgReconcilesPreset(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.cfg.Preset = "superfast" // x264 name, invalid for nvenc
+	out, _ := m.Update(resolvedMsg{encoder: "h264_nvenc", backend: "nvenc", codec: "h264", hwaccel: "auto"})
+	if got := out.(Model).cfg.Preset; got != "p5" {
+		t.Errorf("preset after resolving to nvenc = %q, want p5", got)
+	}
+}
+
+func TestAdjustPresetCyclesResolvedSet(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.backend, m.encoder, m.resolved = "nvenc", "hevc_nvenc", true
+	m.cfg.Preset, m.field = "p5", fPreset
+	if out, _ := m.adjust(+1); out.(Model).cfg.Preset != "p6" {
+		t.Errorf("nvenc preset +1 from p5 = %q, want p6", out.(Model).cfg.Preset)
+	}
+}
+
 func TestAdjustCRFClamps(t *testing.T) {
 	m := newTestModel(t, "/x/a.mkv")
 	m.field = fCRF
