@@ -20,6 +20,7 @@ import (
 type Pool struct {
 	cfg         *config.Config
 	sem         *semaphore.Weighted
+	gate        *gate
 	resolveOnce sync.Once
 	encoder     string // resolved once per run via resolveEncoder
 	backend     string
@@ -27,10 +28,18 @@ type Pool struct {
 
 func New(cfg *config.Config) *Pool {
 	return &Pool{
-		cfg: cfg,
-		sem: semaphore.NewWeighted(int64(cfg.Workers)),
+		cfg:  cfg,
+		sem:  semaphore.NewWeighted(int64(cfg.Workers)),
+		gate: newGate(),
 	}
 }
+
+// TogglePause pauses or resumes dispatch and reports the new paused state.
+// In-flight jobs are never interrupted; pausing only withholds new ones.
+func (p *Pool) TogglePause() bool { return p.gate.toggle() }
+
+// Paused reports whether dispatch is currently paused.
+func (p *Pool) Paused() bool { return p.gate.paused() }
 
 // resolveEncoder probes for the hardware encoder once (it spawns ffmpeg) and
 // records the choice for all files in this run. Safe to call concurrently and
@@ -105,19 +114,27 @@ func (p *Pool) RunWithCallbacks(
 ) {
 	p.resolveEncoder(ctx)
 	var wg sync.WaitGroup
+	// Sequential dispatcher: block at the pause gate, then take a worker slot,
+	// then spawn. Pausing stops new dispatch here while in-flight jobs run on;
+	// the semaphore still bounds concurrency.
 	for _, f := range files {
+		if err := p.gate.wait(ctx); err != nil {
+			if onComplete != nil {
+				onComplete(f, err)
+			}
+			continue
+		}
+		if err := p.sem.Acquire(ctx, 1); err != nil {
+			if onComplete != nil {
+				onComplete(f, err)
+			}
+			continue
+		}
 		f := f
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := p.sem.Acquire(ctx, 1); err != nil {
-				if onComplete != nil {
-					onComplete(f, err)
-				}
-				return
-			}
 			defer p.sem.Release(1)
-
 			err := p.transcode(ctx, f, onProgress)
 			if onComplete != nil {
 				onComplete(f, err)
