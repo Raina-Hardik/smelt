@@ -111,7 +111,7 @@ Flags:
       --force                    re-transcode even if the output file already exists
   -h, --help                     help for transcode
       --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
-      --inplace                  replace original file after successful transcode
+      --inplace                  replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --output-dir string        write output files to this directory instead of alongside source
       --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
@@ -136,9 +136,9 @@ Global Flags:
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
 | `--ext` | strings | `mkv,mp4,avi` | Comma-separated list of file extensions to match during the directory scan. Case-insensitive. Leading dots optional. |
 | `--ffmpeg-arg` | stringArray | _(none)_ | Raw ffmpeg argument passed through verbatim. Repeatable — one token per flag (e.g. `--ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2`). Profile `extra_args` are prepended before these. |
-| `--force` | bool | `false` | Re-transcode even when the output already exists. Without it, re-runs are idempotent: existing outputs (and smelt's own `<suffix>` files) are skipped. Ignored for `--inplace`. |
+| `--force` | bool | `false` | Re-transcode even when a file is already up to date. Without it, re-runs are idempotent: normal runs skip existing outputs (and smelt's own `<suffix>` files); `--inplace` skips files already in the target codec. `--force` disables both. |
 | `--hwaccel` | string | `auto` | Hardware acceleration backend: `auto`, `none`, `nvenc`, `qsv`, `vaapi`, `amf`, `videotoolbox`. `auto` functionally probes for a usable GPU encoder for the target codec and falls back to software; an explicit backend that isn't usable also falls back. The chosen encoder is logged. |
-| `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
+| `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. Files already in the target codec are skipped (probed with `ffprobe`; override with `--force`). The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
 | `--preset` | string | `medium` | Encoding preset (speed/quality trade-off). Given an x264-style name (`ultrafast`…`veryslow`), it is normalized into the resolved encoder's namespace: NVENC → `fast`/`medium`/`slow` (or pass `p1`–`p7`), QSV → `veryfast`…`veryslow`, SVT-AV1 → a number `0`–`13`. Ignored for VP9/VAAPI/AMF/VideoToolbox. |
 | `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
@@ -179,7 +179,7 @@ Flags:
       --force                    re-transcode even if the output file already exists
   -h, --help                     help for tui
       --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
-      --inplace                  replace original file after successful transcode
+      --inplace                  replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --output-dir string        write output files to this directory instead of alongside source
       --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string           named profile preset from config; explicit flags still override it
