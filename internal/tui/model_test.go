@@ -7,6 +7,7 @@ import (
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
+	"github.com/Raina-Hardik/smelt/internal/worker"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -156,6 +157,22 @@ func TestQuitAfterFinishedExitsImmediately(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("q after finish should return tea.Quit, not nil")
+	}
+}
+
+func TestPauseTogglesPoolAndState(t *testing.T) {
+	m := running(newTestModel(t, "/x/a.mkv"))
+	m.pool = worker.New(m.cfg)
+
+	out, _ := m.handleKey(keyMsg("p"))
+	m = out.(Model)
+	if !m.paused || !m.pool.Paused() {
+		t.Fatalf("p should pause: model=%v pool=%v", m.paused, m.pool.Paused())
+	}
+	out, _ = m.handleKey(keyMsg("p"))
+	m = out.(Model)
+	if m.paused || m.pool.Paused() {
+		t.Errorf("second p should resume: model=%v pool=%v", m.paused, m.pool.Paused())
 	}
 }
 
