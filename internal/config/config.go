@@ -28,7 +28,8 @@ type Config struct {
 	AudioBitrate   string // e.g. "192k"; applied only when re-encoding audio
 	HWAccel        string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
 	InPlace        bool
-	SkipHardlinked bool   // --inplace: skip files hardlinked elsewhere (avoid breaking the link)
+	SkipHardlinked   bool     // --inplace: skip files hardlinked elsewhere (avoid breaking the link)
+	SkipSourceCodecs []string // skip files whose current video codec is in this list (e.g. av1)
 	Force          bool   // re-transcode even when the output already exists
 	Container      string // --to: target container/format (e.g. mp4); empty keeps source
 	OutputDir      string
@@ -79,7 +80,8 @@ func Load() *Config {
 		AudioBitrate:   viper.GetString("transcode.audio_bitrate"),
 		HWAccel:        hwaccel,
 		InPlace:        viper.GetBool("transcode.inplace"),
-		SkipHardlinked: viper.GetBool("transcode.skip_hardlinked"),
+		SkipHardlinked:   viper.GetBool("transcode.skip_hardlinked"),
+		SkipSourceCodecs: viper.GetStringSlice("transcode.skip_source_codecs"),
 		Force:          viper.GetBool("transcode.force"),
 		Container:      strings.TrimPrefix(viper.GetString("transcode.to"), "."),
 		OutputDir:      viper.GetString("transcode.output_dir"),

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/worker"
 	"github.com/rs/zerolog/log"
@@ -51,6 +52,10 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		log.Warn().Str("src", cfg.Src).Strs("ext", cfg.Ext).Msg("no matching files")
 		return nil
 	}
+
+	// Resolve the best hardware-available codec before planning so that the
+	// smart-skip target matches what will actually be encoded.
+	cfg.Codec = ffmpeg.ResolveCodec(cmd.Context(), cfg.Codec, cfg.HWAccel)
 
 	files, skipped := worker.Plan(cmd.Context(), files, cfg)
 	if skipped > 0 {
@@ -130,6 +135,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"skip-hardlinked", false,
 		"with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)",
 	)
+	cmd.Flags().StringArray(
+		"skip-source-codec", nil,
+		"skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)",
+	)
 	cmd.Flags().Bool(
 		"force", false,
 		"re-transcode even if the output file already exists",
@@ -173,6 +182,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"smelt.workers", "workers"},
 		{"transcode.inplace", "inplace"},
 		{"transcode.skip_hardlinked", "skip-hardlinked"},
+		{"transcode.skip_source_codecs", "skip-source-codec"},
 		{"transcode.force", "force"},
 		{"transcode.output_dir", "output-dir"},
 		{"transcode.suffix", "suffix"},

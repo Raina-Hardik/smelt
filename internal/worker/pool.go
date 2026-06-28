@@ -205,6 +205,12 @@ func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config) (t
 				continue
 			}
 		}
+		if len(cfg.SkipSourceCodecs) > 0 {
+			if cur, err := ffmpeg.ProbeVideoCodec(ctx, f.Path); err == nil && isSkippedSource(cur, cfg.SkipSourceCodecs) {
+				skipped++
+				continue
+			}
+		}
 		todo = append(todo, f)
 	}
 	return todo, skipped
@@ -218,6 +224,7 @@ func planInplace(files []scanner.MediaFile, cfg *config.Config, probe func(strin
 		return files, 0
 	}
 	target := ffmpeg.CodecName(cfg.Codec)
+	needProbe := target != "" || len(cfg.SkipSourceCodecs) > 0
 	for _, f := range files {
 		// Transcoding a hardlinked file breaks the link (new inode) and doubles
 		// disk usage; skip it when asked so seeded/deduped libraries stay intact.
@@ -225,15 +232,31 @@ func planInplace(files []scanner.MediaFile, cfg *config.Config, probe func(strin
 			skipped++
 			continue
 		}
-		if target != "" {
-			if cur, err := probe(f.Path); err == nil && cur == target {
-				skipped++
-				continue
+		if needProbe {
+			if cur, err := probe(f.Path); err == nil {
+				if target != "" && cur == target {
+					skipped++
+					continue
+				}
+				if isSkippedSource(cur, cfg.SkipSourceCodecs) {
+					skipped++
+					continue
+				}
 			}
 		}
 		todo = append(todo, f)
 	}
 	return todo, skipped
+}
+
+// isSkippedSource reports whether cur matches any codec name in the skip list.
+func isSkippedSource(cur string, skipCodecs []string) bool {
+	for _, s := range skipCodecs {
+		if strings.ToLower(s) == cur || ffmpeg.CodecName(s) == cur {
+			return true
+		}
+	}
+	return false
 }
 
 // isOwnOutput reports whether path looks like a file smelt itself produced,
