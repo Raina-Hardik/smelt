@@ -129,10 +129,13 @@ func videoEncoder(spec EncodeSpec) string {
 	return codecFlag(spec.Codec)
 }
 
-// preInputArgs are flags that must precede -i (e.g. selecting the VAAPI device).
+// preInputArgs are flags that must precede -i (e.g. selecting the hardware device).
 func preInputArgs(spec EncodeSpec) []string {
-	if spec.Backend == "vaapi" {
+	switch spec.Backend {
+	case "vaapi":
 		return []string{"-vaapi_device", vaapiDevice()}
+	case "qsv":
+		return []string{"-init_hw_device", "qsv=qsv:hw_any"}
 	}
 	return nil
 }

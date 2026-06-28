@@ -89,8 +89,13 @@ func probeEncoder(ctx context.Context, enc, backend string) bool {
 	}
 
 	args := []string{"-hide_banner", "-loglevel", "error"}
-	if backend == "vaapi" {
+	switch backend {
+	case "vaapi":
 		args = append(args, "-vaapi_device", vaapiDevice())
+	case "qsv":
+		// Explicit device init avoids silent probe failures on headless Linux
+		// servers where QSV would otherwise fail to auto-select a DRI node.
+		args = append(args, "-init_hw_device", "qsv=qsv:hw_any")
 	}
 	args = append(args, "-f", "lavfi", "-i", "testsrc=s=320x240:d=1")
 	if backend == "vaapi" {
