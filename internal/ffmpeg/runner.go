@@ -175,7 +175,7 @@ func rateControlArgs(spec EncodeSpec) []string {
 	case "nvenc":
 		args = append(args, "-rc", "vbr", "-cq", crf)
 	case "qsv":
-		args = append(args, "-global_quality", crf)
+		args = append(args, "-q:v", crf) // CQP; ICQ (-global_quality) unsupported on integrated Intel GPUs
 	case "vaapi":
 		args = append(args, "-rc_mode", "CQP", "-qp", crf)
 	case "amf":
