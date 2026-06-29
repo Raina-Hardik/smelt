@@ -63,7 +63,7 @@ func TestPlanExcludesOwnOutputsAndExisting(t *testing.T) {
 
 	cfg := &config.Config{Suffix: ".smelt"}
 	files := []scanner.MediaFile{{Path: src}, {Path: own}, {Path: fresh}}
-	todo, skipped := Plan(context.Background(), files, cfg)
+	todo, skipped := Plan(context.Background(), files, cfg, nil)
 
 	// a.mkv skipped (a.smelt.mkv exists), b.smelt.mkv skipped (own output), c.mkv kept.
 	if skipped != 2 || len(todo) != 1 || todo[0].Path != fresh {
@@ -77,7 +77,7 @@ func TestPlanForceKeepsExisting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a.smelt.mkv"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	todo, skipped := Plan(context.Background(), []scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true})
+	todo, skipped := Plan(context.Background(), []scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true}, nil)
 	if skipped != 0 || len(todo) != 1 {
 		t.Errorf("with --force: (todo %d, skipped %d), want (1, 0)", len(todo), skipped)
 	}
@@ -97,7 +97,7 @@ func TestPlanInplaceSmartSkip(t *testing.T) {
 			return "", errors.New("probe failed") // unknown → keep
 		}
 	}
-	todo, skipped := planInplace(files, cfg, probe)
+	todo, skipped := planInplace(files, cfg, nil, probe)
 	if skipped != 1 || len(todo) != 2 {
 		t.Fatalf("smart-skip: (todo %d, skipped %d), want (2, 1)", len(todo), skipped)
 	}
@@ -115,7 +115,7 @@ func TestPlanInplaceSkipHardlinked(t *testing.T) {
 		{Path: "/x/solo.mkv", Links: 1},   // single link, h264 → keep
 	}
 	probe := func(string) (string, error) { return "h264", nil }
-	todo, skipped := planInplace(files, cfg, probe)
+	todo, skipped := planInplace(files, cfg, nil, probe)
 	if skipped != 1 || len(todo) != 1 || todo[0].Path != "/x/solo.mkv" {
 		t.Fatalf("skip-hardlinked: (todo %v, skipped %d), want ([solo], 1)", todo, skipped)
 	}
@@ -125,7 +125,7 @@ func TestPlanInplaceSkipHardlinked(t *testing.T) {
 func TestPlanInplaceHardlinkedKeptByDefault(t *testing.T) {
 	cfg := &config.Config{Codec: "h265", InPlace: true}
 	files := []scanner.MediaFile{{Path: "/x/linked.mkv", Links: 5}}
-	todo, skipped := planInplace(files, cfg, func(string) (string, error) { return "h264", nil })
+	todo, skipped := planInplace(files, cfg, nil, func(string) (string, error) { return "h264", nil })
 	if skipped != 0 || len(todo) != 1 {
 		t.Errorf("default: (todo %d, skipped %d), want (1, 0)", len(todo), skipped)
 	}
@@ -136,7 +136,7 @@ func TestPlanInplaceForceKeepsAll(t *testing.T) {
 	cfg := &config.Config{Codec: "h265", InPlace: true, Force: true}
 	files := []scanner.MediaFile{{Path: "/x/a.mkv"}, {Path: "/x/b.mkv"}}
 	probed := false
-	todo, skipped := planInplace(files, cfg, func(string) (string, error) { probed = true; return "hevc", nil })
+	todo, skipped := planInplace(files, cfg, nil, func(string) (string, error) { probed = true; return "hevc", nil })
 	if skipped != 0 || len(todo) != 2 || probed {
 		t.Errorf("force: (todo %d, skipped %d, probed %v), want (2, 0, false)", len(todo), skipped, probed)
 	}
@@ -149,7 +149,7 @@ func TestTranscodeCleansUpOnFailure(t *testing.T) {
 	src := filepath.Join(dir, "missing.mkv")
 	cfg := &config.Config{Workers: 1, Codec: "h264", Suffix: ".smelt"}
 
-	p := New(cfg)
+	p := New(cfg, nil)
 	f := scanner.MediaFile{Path: src}
 	err := p.transcode(context.Background(), f, nil)
 	if err == nil {

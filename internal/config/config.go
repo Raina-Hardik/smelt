@@ -37,6 +37,9 @@ type Config struct {
 	Profile        string
 	ExtraArgs      []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
 
+	SubtitleMode string // "copy" (default) | "drop"
+	DBPath       string // path to the SQLite history database; "" disables the DB
+
 	// CLI-only flags (not in config.yaml)
 	DryRun    bool
 	AssumeYes bool // -y: skip destructive-action confirmation prompts
@@ -90,6 +93,9 @@ func Load() *Config {
 		// Profile extra_args come first; CLI --ffmpeg-arg refine/append after.
 		ExtraArgs: append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
 
+		SubtitleMode: viper.GetString("transcode.subs"),
+		DBPath:       viper.GetString("smelt.db"),
+
 		DryRun:    viper.GetBool("transcode.dry_run"),
 		AssumeYes: viper.GetBool("smelt.assume_yes"),
 	}
@@ -142,6 +148,11 @@ func (c *Config) Validate() error {
 	}
 	if c.AudioCodec != "" && !ffmpeg.IsKnownAudioCodec(c.AudioCodec) { // "" == copy (Load defaults it)
 		return fmt.Errorf("unknown --audio-codec %q; valid: %s", c.AudioCodec, strings.Join(ffmpeg.KnownAudioCodecs(), ", "))
+	}
+	switch strings.ToLower(c.SubtitleMode) {
+	case "", "copy", "drop":
+	default:
+		return fmt.Errorf("unknown --subs %q; valid: copy, drop", c.SubtitleMode)
 	}
 	return nil
 }

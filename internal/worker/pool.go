@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/db"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/rs/zerolog/log"
@@ -19,6 +20,7 @@ import (
 
 type Pool struct {
 	cfg         *config.Config
+	db          *db.DB // nil when DB is disabled
 	sem         *semaphore.Weighted
 	gate        *gate
 	resolveOnce sync.Once
@@ -26,9 +28,10 @@ type Pool struct {
 	backend     string
 }
 
-func New(cfg *config.Config) *Pool {
+func New(cfg *config.Config, database *db.DB) *Pool {
 	return &Pool{
 		cfg:  cfg,
+		db:   database,
 		sem:  semaphore.NewWeighted(int64(cfg.Workers)),
 		gate: newGate(),
 	}
@@ -168,29 +171,77 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		Preset:       p.cfg.Preset,
 		AudioCodec:   p.cfg.AudioCodec,
 		AudioBitrate: p.cfg.AudioBitrate,
+		SubtitleMode: p.cfg.SubtitleMode,
 		ExtraArgs:    p.cfg.ExtraArgs,
 		Container:    strings.TrimPrefix(filepath.Ext(dst), "."),
 		Encoder:      p.encoder,
 		Backend:      p.backend,
 	}
+
+	start := time.Now()
 	if err = ffmpeg.Run(ctx, f.Path, tmp, spec, onProgress); err != nil {
+		p.record(f, dst, spec, time.Since(start), err)
 		return err
+	}
+
+	// Preserve the source file's permission bits on the output so that
+	// restricted files (e.g. 0600) are not silently opened up after transcode.
+	if f.Mode != 0 {
+		if chmodErr := os.Chmod(tmp, f.Mode.Perm()); chmodErr != nil {
+			log.Warn().Err(chmodErr).Str("file", f.Path).Msg("could not preserve file permissions")
+		}
 	}
 
 	if err = os.Rename(tmp, dst); err != nil {
 		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
 	}
+	p.record(f, dst, spec, time.Since(start), nil)
 	return nil
+}
+
+// record persists a transcode outcome to the history DB (no-op when DB is nil).
+func (p *Pool) record(f scanner.MediaFile, dst string, spec ffmpeg.EncodeSpec, elapsed time.Duration, transcodeErr error) {
+	if p.db == nil {
+		return
+	}
+	var outSize int64
+	if fi, err := os.Stat(dst); err == nil {
+		outSize = fi.Size()
+	}
+	status, errMsg := "done", ""
+	if transcodeErr != nil {
+		status = "failed"
+		errMsg = transcodeErr.Error()
+	}
+	r := db.Record{
+		SourcePath:  f.Path,
+		SourceMtime: f.Mtime,
+		SourceSize:  f.Size,
+		OutputPath:  dst,
+		OutputSize:  outSize,
+		TargetCodec: spec.Codec,
+		Encoder:     spec.Encoder,
+		Backend:     spec.Backend,
+		CRF:         spec.CRF,
+		Preset:      spec.Preset,
+		ElapsedMs:   elapsed.Milliseconds(),
+		Status:      status,
+		ErrorMsg:    errMsg,
+		CompletedAt: time.Now(),
+	}
+	if err := p.db.Insert(r); err != nil {
+		log.Warn().Err(err).Str("file", f.Path).Msg("db: failed to record transcode")
+	}
 }
 
 // Plan filters a scanned file list down to what actually needs transcoding.
 // Non-inplace runs drop (a) our own previously generated outputs
 // (`*<suffix><ext>`) and (b) sources whose output already exists. In-place runs
 // probe each file's video codec and drop those already in the target codec.
-// cfg.Force disables all skipping.
-func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config) (todo []scanner.MediaFile, skipped int) {
+// cfg.Force disables all skipping. database may be nil (disables DB-based skip).
+func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config, database *db.DB) (todo []scanner.MediaFile, skipped int) {
 	if cfg.InPlace {
-		return planInplace(files, cfg, func(p string) (string, error) {
+		return planInplace(files, cfg, database, func(p string) (string, error) {
 			return ffmpeg.ProbeVideoCodec(ctx, p)
 		})
 	}
@@ -219,7 +270,8 @@ func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config) (t
 // planInplace keeps only files that aren't already in the target codec. The
 // probe is injected for testability. On probe failure (or an unknown target)
 // the file is kept — better to attempt a transcode than to wrongly skip.
-func planInplace(files []scanner.MediaFile, cfg *config.Config, probe func(string) (string, error)) (todo []scanner.MediaFile, skipped int) {
+// DB-based skip (matched mtime) short-circuits the ffprobe call on re-runs.
+func planInplace(files []scanner.MediaFile, cfg *config.Config, database *db.DB, probe func(string) (string, error)) (todo []scanner.MediaFile, skipped int) {
 	if cfg.Force {
 		return files, 0
 	}
@@ -229,6 +281,12 @@ func planInplace(files []scanner.MediaFile, cfg *config.Config, probe func(strin
 		// Transcoding a hardlinked file breaks the link (new inode) and doubles
 		// disk usage; skip it when asked so seeded/deduped libraries stay intact.
 		if cfg.SkipHardlinked && f.Links > 1 {
+			skipped++
+			continue
+		}
+		// DB fast-path: if we have a completed record for this exact file version,
+		// skip without probing (avoids re-running ffprobe on every re-run).
+		if database != nil && database.IsDone(f.Path, f.Mtime) {
 			skipped++
 			continue
 		}

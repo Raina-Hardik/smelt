@@ -27,7 +27,7 @@ func newTestModel(t *testing.T, paths ...string) Model {
 	for i, p := range paths {
 		files[i] = scanner.MediaFile{Path: p}
 	}
-	return New(&config.Config{Workers: 2, Codec: "h264", HWAccel: "auto", Suffix: ".smelt"}, files, ctx)
+	return New(&config.Config{Workers: 2, Codec: "h264", HWAccel: "auto", Suffix: ".smelt"}, files, ctx, nil)
 }
 
 // running returns a model already past the pre-flight screen.
@@ -162,7 +162,7 @@ func TestQuitAfterFinishedExitsImmediately(t *testing.T) {
 
 func TestPauseTogglesPoolAndState(t *testing.T) {
 	m := running(newTestModel(t, "/x/a.mkv"))
-	m.pool = worker.New(m.cfg)
+	m.pool = worker.New(m.cfg, nil)
 
 	out, _ := m.handleKey(keyMsg("p"))
 	m = out.(Model)

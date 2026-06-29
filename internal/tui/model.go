@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/db"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/worker"
@@ -104,6 +105,7 @@ func (le listEntry) Description() string { return le.status.label() }
 
 type Model struct {
 	cfg        *config.Config
+	db         *db.DB       // nil when DB is disabled
 	pool       *worker.Pool // created when the run starts; nil on the pre-flight screen
 	field      confField    // focused field on the editable pre-flight screen
 	files      []scanner.MediaFile
@@ -129,7 +131,7 @@ type Model struct {
 	showHelp   bool
 }
 
-func New(cfg *config.Config, files []scanner.MediaFile, ctx context.Context) Model {
+func New(cfg *config.Config, files []scanner.MediaFile, ctx context.Context, database *db.DB) Model {
 	events := make(chan tea.Msg, len(files)*4+4)
 
 	// Own a cancellable child of the caller's context so an in-app quit (q/Q)
@@ -159,6 +161,7 @@ func New(cfg *config.Config, files []scanner.MediaFile, ctx context.Context) Mod
 
 	return Model{
 		cfg:       cfg,
+		db:        database,
 		files:     files,
 		fileItems: fileItems,
 		fileIndex: fileIndex,
@@ -295,7 +298,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handlePreflightKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "s":
-		m.pool = worker.New(m.cfg)
+		m.pool = worker.New(m.cfg, m.db)
 		m.started = true
 		m.launch()
 		return m, listenForEvent(m.events)

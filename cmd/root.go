@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Raina-Hardik/smelt/internal/db"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -61,10 +62,15 @@ func init() {
 		"assume-yes", "y", false,
 		"skip confirmation prompts (assume yes) for destructive actions",
 	)
+	rootCmd.PersistentFlags().String(
+		"db", db.DefaultPath(),
+		`path to the SQLite history database; set to "" to disable`,
+	)
 
 	_ = viper.BindPFlag("smelt.log_level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("smelt.log_format", rootCmd.PersistentFlags().Lookup("log-format"))
 	_ = viper.BindPFlag("smelt.assume_yes", rootCmd.PersistentFlags().Lookup("assume-yes"))
+	_ = viper.BindPFlag("smelt.db", rootCmd.PersistentFlags().Lookup("db"))
 }
 
 // initLogger installs a sensible default before flags/config are resolved.
@@ -101,6 +107,16 @@ func configureLogger(level, format string) {
 func stderrIsTTY() bool {
 	fi, err := os.Stderr.Stat()
 	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
+}
+
+// openDB opens the history database from viper's resolved path. Returns nil
+// (no-op, no error) when the path is empty (DB disabled by the user).
+func openDB() (*db.DB, error) {
+	path := viper.GetString("smelt.db")
+	if path == "" {
+		return nil, nil
+	}
+	return db.Open(path)
 }
 
 func initConfig() {
