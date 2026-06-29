@@ -24,22 +24,25 @@ smelt:
   workers: 4                  # int    — parallel ffmpeg jobs; 0 = runtime.NumCPU()
   log_level: info             # string — debug | info | warn | error
   log_format: auto            # string — auto | json | pretty
+  db: ""                      # string — SQLite history DB path; "" = $XDG_DATA_HOME/smelt/history.db
 
 transcode:
-  src: ""                     # string — source directory path (required)
+  src: ""                     # string   — source directory path (required)
   ext: [mkv, mp4, avi]        # []string — extensions to match, no leading dot
-  codec: h265                 # string — h264 | h265 | av1 | vp9
-  crf: 23                     # int    — constant rate factor, 0–51
-  preset: medium              # string — encoding preset (normalized per encoder)
-  hwaccel: auto               # string — auto | none | nvenc | qsv | vaapi | amf | videotoolbox
-  audio_codec: copy           # string — copy | aac | opus | mp3 | ac3 | flac
-  audio_bitrate: ""           # string — e.g. 192k; only when re-encoding audio
-  inplace: false              # bool   — replace original after successful transcode
-  skip_hardlinked: false      # bool   — with inplace, skip hardlinked files
-  force: false                # bool   — re-transcode even when already up to date
-  to: ""                      # string — target container (mp4|mkv|webm|…); empty keeps source
-  output_dir: ""              # string — redirect output here; empty = alongside source
-  suffix: ".smelt"            # string — output filename suffix (alongside source)
+  codec: h265                 # string   — h264 | h265 | av1 | vp9
+  crf: 23                     # int      — constant rate factor, 0–51
+  preset: medium              # string   — encoding preset (normalized per encoder)
+  hwaccel: auto               # string   — auto | none | nvenc | qsv | vaapi | amf | videotoolbox
+  audio_codec: copy           # string   — copy | aac | opus | mp3 | ac3 | flac
+  audio_bitrate: ""           # string   — e.g. 192k; only when re-encoding audio
+  subs: copy                  # string   — copy | drop (subtitle stream handling)
+  inplace: false              # bool     — replace original after successful transcode
+  skip_hardlinked: false      # bool     — with inplace, skip hardlinked files
+  skip_source_codecs: []      # []string — skip files already in these codecs (e.g. [av1])
+  force: false                # bool     — re-transcode even when already up to date
+  to: ""                      # string   — target container (mp4|mkv|webm|…); empty keeps source
+  output_dir: ""              # string   — redirect output here; empty = alongside source
+  suffix: ".smelt"            # string   — output filename suffix (alongside source)
 
 profiles:
   web:
@@ -114,6 +117,26 @@ use `json` explicitly when piping to log aggregators.
 ```yaml
 smelt:
   log_format: json
+```
+
+#### `smelt.db`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `$XDG_DATA_HOME/smelt/history.db` (or `~/.local/share/smelt/history.db`) |
+| CLI flag | `--db` |
+| Env var | `SMELT_DB` |
+
+Path to the SQLite history database. Every completed transcode (success or
+failure) is recorded here with timestamps, encoder settings, elapsed time, and
+file sizes. Used by `smelt history` and for fast skip detection on `--inplace`
+re-runs (avoids re-probing files whose mtime hasn't changed). Set to `""` to
+disable history recording entirely.
+
+```yaml
+smelt:
+  db: /mnt/media/.smelt-history.db
 ```
 
 ---
@@ -282,6 +305,46 @@ Target audio bitrate when re-encoding, e.g. `192k`. Ignored when
 ```yaml
 transcode:
   audio_bitrate: 192k
+```
+
+#### `transcode.subs`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `copy` |
+| Valid values | `copy` \| `drop` |
+| CLI flag | `--subs` |
+| Env var | `SMELT_SUBS` |
+
+Subtitle stream handling. `copy` preserves all subtitle tracks from the source
+(the default, so embedded subtitles survive transcoding). `drop` strips all
+subtitle streams from the output (equivalent to `-sn` in ffmpeg). Note: when
+using `--to mp4`, some subtitle codecs (e.g. PGS, ASS) are not supported by the
+MP4 muxer — use `subs: drop` to avoid mux errors.
+
+```yaml
+transcode:
+  subs: copy
+```
+
+#### `transcode.skip_source_codecs`
+
+| Attribute | Value |
+|---|---|
+| Type | `[]string` |
+| Default | `[]` (skip nothing) |
+| CLI flag | `--skip-source-codec` (repeatable) |
+| Env var | `SMELT_SKIP_SOURCE_CODEC` |
+
+Skip files whose current video codec matches any entry in this list. Accepts the
+same aliases as `transcode.codec` (`h264`, `h265`, `av1`, `vp9`) as well as raw
+ffprobe codec names (`hevc`, `h264`, `av1`). Useful for protecting
+already-optimal files from being downgraded.
+
+```yaml
+transcode:
+  skip_source_codecs: [av1]    # never re-encode files that are already AV1
 ```
 
 #### `transcode.inplace`

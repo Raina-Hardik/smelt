@@ -11,9 +11,11 @@ progress propagation.
 smelt/
 ├── main.go                  Entry point — calls cmd.Execute()
 ├── cmd/                     Cobra command tree; no business logic
-│   ├── root.go              Root command, persistent flags, zerolog/viper init
+│   ├── root.go              Root command, persistent flags (incl. --db), openDB helper
 │   ├── transcode.go         `smelt transcode` — delegates to scanner + worker
 │   ├── tui.go               `smelt tui` — delegates to scanner + tui.Model
+│   ├── check.go             `smelt check` — parallel ffprobe health check
+│   ├── history.go           `smelt history` — query the SQLite history DB
 │   ├── workflow.go          `smelt workflow` — emits a schedulable shell script
 │   ├── config.go            `smelt config init` — writes starter config.yaml
 │   └── version.go           `smelt version` — prints build metadata
@@ -21,13 +23,16 @@ smelt/
     ├── config/
     │   └── config.go        Config struct + Load() — reads viper state
     ├── scanner/
-    │   ├── scanner.go       Scan() — doublestar walk → []MediaFile
+    │   ├── scanner.go       Scan() — doublestar walk → []MediaFile (path/size/mtime/mode/links)
     │   └── links_{unix,other}.go  hardlink-count helper (build-tagged)
+    ├── db/
+    │   └── db.go            Open(WAL) — Insert/IsDone/Recent; Record struct
     ├── ffmpeg/
     │   ├── runner.go        Run(EncodeSpec) — exec wrapper, progress parsing, typed errors
-    │   └── accel.go         ResolveEncoder() — functional HW-encoder probe + fallback
+    │   ├── accel.go         ResolveEncoder() — functional HW-encoder probe + fallback
+    │   └── accel_{linux,darwin,windows}.go  per-GOOS hwPriority + vaapiDevice
     ├── worker/
-    │   ├── pool.go          Pool — sequential dispatch, Run() + RunWithCallbacks()
+    │   ├── pool.go          Pool — sequential dispatch, Run() + RunWithCallbacks(); DB recording
     │   └── gate.go          pausable dispatch gate (TogglePause/Paused)
     ├── workflow/
     │   └── workflow.go      Script() — render a transcode job as a shell script
@@ -41,11 +46,12 @@ smelt/
 
 | Package | Owns | Does NOT own |
 |---|---|---|
-| `cmd` | CLI surface, flag/viper wiring | Any transcoding or scanning logic |
+| `cmd` | CLI surface, flag/viper wiring, DB open/close | Any transcoding or scanning logic |
 | `internal/config` | `Config` struct, viper deserialization | Flag definition, file I/O |
-| `internal/scanner` | Directory walk, extension filtering | ffmpeg, workers, config |
-| `internal/ffmpeg` | ffmpeg process lifecycle, progress parsing | Concurrency, file routing |
-| `internal/worker` | Semaphore pool, job dispatch, result aggregation | ffmpeg args, TUI state |
+| `internal/scanner` | Directory walk, extension/permission/mtime collection | ffmpeg, workers, config |
+| `internal/db` | SQLite WAL database, Record insert/query, DefaultPath | Business logic, config |
+| `internal/ffmpeg` | ffmpeg/ffprobe process lifecycle, HW probe, progress parsing | Concurrency, file routing |
+| `internal/worker` | Semaphore pool, job dispatch, DB recording, result aggregation | ffmpeg args, TUI state |
 | `internal/tui` | bubbletea model, render, keybindings | Transcoding logic, scanner |
 
 ---
@@ -97,14 +103,15 @@ CLI flags / config.yaml / env vars
    containing the absolute path, extension, and file size of every match.
    Scan is intentionally single-threaded and fast; it is not the bottleneck.
 
-3. **Worker pool** — `worker.New(cfg)` constructs a `Pool` with a
+3. **Worker pool** — `worker.New(cfg, db)` constructs a `Pool` with a
    `semaphore.Weighted` of size `cfg.Workers` and a pausable dispatch gate. The
    dispatch loop is **sequential**: for each file it waits at the gate (a no-op
    unless paused via the TUI's `p`), acquires one semaphore slot, then spawns a
    goroutine that runs `ffmpeg.Run()` and releases the slot. The semaphore caps
    parallelism at exactly `cfg.Workers`; pausing withholds *new* dispatch while
    in-flight jobs run on. The encoder is resolved once per run (`ResolveEncoder`,
-   a functional GPU probe) and reused for every file.
+   a functional GPU probe) and reused for every file. After each encode the result
+   (success or failure) is written to the history DB via `pool.record()`.
 
 4. **ffmpeg runner** — `ffmpeg.Run(ctx, src, dst, spec, onProgress)` takes a
    resolved `EncodeSpec` (codec, crf, preset, audio, container, resolved
