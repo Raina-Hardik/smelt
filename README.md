@@ -140,3 +140,11 @@ See [docs/CONFIG.md](docs/CONFIG.md) for the full schema and key reference.
 ## License
 
 ISC — see [LICENSE](LICENSE).
+
+---
+
+## AI Disclosure
+
+Initial project scaffolding generated using Claude Sonnet 4.6.
+- `#84e9215` docs: add full API-first surface documentation and lock CLI
+- `#6ce437f` feat: initial project scaffold
