@@ -1,6 +1,6 @@
 # smelt CLI Reference
 
-All commands, flags, and exact `--help` output for smelt v1.0.
+All commands, flags, and exact `--help` output for smelt.
 
 ---
 
@@ -12,7 +12,8 @@ These flags are accepted by every command.
 |---|---|---|---|
 | `-y`, `--assume-yes` | bool | `false` | Skip confirmation prompts (assume yes) for destructive actions such as `--inplace`. |
 | `--config` | string | _(auto-search)_ | Path to config file. Searches `./config.yaml` then `$HOME/.config/smelt/config.yaml` when empty. |
-| `--log-format` | string | `auto` | Log output format: `auto` \| `json` \| `pretty`. `auto` selects `pretty` when stdout is a TTY, `json` otherwise. |
+| `--db` | string | `$XDG_DATA_HOME/smelt/history.db` | Path to the SQLite history database. Set to `""` to disable history recording entirely. |
+| `--log-format` | string | `auto` | Log output format: `auto` \| `json` \| `pretty`. `auto` selects `pretty` when stderr is a TTY, `json` otherwise. |
 | `--log-level` | string | `info` | Log verbosity: `debug` \| `info` \| `warn` \| `error`. |
 
 ---
@@ -30,9 +31,11 @@ Usage:
   smelt [command]
 
 Available Commands:
+  check       Probe a directory for corrupt or unreadable media files
   completion  Generate the autocompletion script for the specified shell
   config      Manage smelt configuration
   help        Help about any command
+  history     Show recent transcode history from the processed-file database
   transcode   Transcode media files in a directory
   tui         Launch the interactive transcoding TUI
   version     Print smelt version information
@@ -41,6 +44,7 @@ Available Commands:
 Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
   -h, --help                help for smelt
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -60,6 +64,11 @@ During transcoding, output is written to a transient `<name>.transcoded<ext>`
 artifact (deleted on any failure). On success it is renamed to its final path:
 `<name><ext>` with `--inplace`, or `<name>.smelt<ext>` by default. Use
 `--output-dir` to redirect all output into a separate directory.
+
+All streams from the source are preserved by default: the primary video stream
+is re-encoded, all audio tracks are stream-copied, and all subtitle tracks are
+copied. Use `--subs drop` to strip subtitles, or `--audio-codec` to re-encode
+audio. Completed transcodes are recorded to the history database (`--db`).
 
 ### Synopsis
 
@@ -84,6 +93,9 @@ smelt transcode --src /mnt/media --profile web
 
 # Write transcoded files to a separate directory
 smelt transcode --src /mnt/media --output-dir /mnt/transcoded
+
+# Skip AV1 files and drop subtitle streams
+smelt transcode --src /mnt/media --skip-source-codec av1 --subs drop
 ```
 
 ### `--help` output
@@ -104,29 +116,32 @@ Examples:
   smelt transcode --src /mnt/media --output-dir /mnt/transcoded
 
 Flags:
-      --audio-bitrate string     audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
-      --audio-codec string       audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
-      --codec string             target video codec: h264|h265|av1|vp9 (default "h265")
-      --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
-      --dry-run                  print transcode plan without executing anything
-      --ext strings              file extensions to match (default [mkv,mp4,avi])
-      --ffmpeg-arg stringArray   raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
-      --force                    re-transcode even if the output file already exists
-  -h, --help                     help for transcode
-      --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
-      --inplace                  replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
-      --output-dir string        write output files to this directory instead of alongside source
-      --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
-      --profile string           named profile preset from config; explicit flags still override it
-      --skip-hardlinked          with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
-      --src string               source directory to scan (default ".")
-      --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
-      --to string                target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
-      --workers int              maximum parallel transcode jobs; 0 = runtime.NumCPU()
+      --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
+      --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
+      --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
+      --dry-run                         print transcode plan without executing anything
+      --ext strings                     file extensions to match (default [mkv,mp4,avi])
+      --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+      --force                           re-transcode even if the output file already exists
+  -h, --help                            help for transcode
+      --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
+      --output-dir string               write output files to this directory instead of alongside source
+      --preset string                   encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
+      --profile string                  named profile preset from config; explicit flags still override it
+      --skip-hardlinked                 with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
+      --skip-source-codec stringArray   skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)
+      --src string                      source directory to scan (default ".")
+      --subs string                     subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles) (default "copy")
+      --suffix string                   filename suffix for outputs written alongside the source (default ".smelt")
+      --to string                       target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
+      --workers int                     maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
 ```
@@ -142,14 +157,16 @@ Global Flags:
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
 | `--ext` | strings | `mkv,mp4,avi` | Comma-separated list of file extensions to match during the directory scan. Case-insensitive. Leading dots optional. |
 | `--ffmpeg-arg` | stringArray | _(none)_ | Raw ffmpeg argument passed through verbatim. Repeatable — one token per flag (e.g. `--ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2`). Profile `extra_args` are prepended before these. |
-| `--force` | bool | `false` | Re-transcode even when a file is already up to date. Without it, re-runs are idempotent: normal runs skip existing outputs (and smelt's own `<suffix>` files); `--inplace` skips files already in the target codec. `--force` disables both. |
+| `--force` | bool | `false` | Re-transcode even when a file is already up to date. Without it, re-runs are idempotent: normal runs skip existing outputs (and smelt's own `<suffix>` files); `--inplace` skips files already in the target codec (or in the DB). `--force` disables both. |
 | `--hwaccel` | string | `auto` | Hardware acceleration backend: `auto`, `none`, `nvenc`, `qsv`, `vaapi`, `amf`, `videotoolbox`. `auto` functionally probes for a usable GPU encoder for the target codec and falls back to software; an explicit backend that isn't usable also falls back. The chosen encoder is logged. |
 | `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. Files already in the target codec are skipped (probed with `ffprobe`; override with `--force`). The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
 | `--preset` | string | `medium` | Encoding preset (speed/quality trade-off). Given an x264-style name (`ultrafast`…`veryslow`), it is normalized into the resolved encoder's namespace: NVENC → `fast`/`medium`/`slow` (or pass `p1`–`p7`), QSV → `veryfast`…`veryslow`, SVT-AV1 → a number `0`–`13`. Ignored for VP9/VAAPI/AMF/VideoToolbox. |
 | `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
-| `--skip-hardlinked` | bool | `false` | With `--inplace`, skip files whose hardlink count is >1. Transcoding replaces the inode, breaking the hardlink (e.g. to a torrent client's copy) and doubling disk usage — useful for ARR/seedbox setups. Overridden by `--force`. No effect without `--inplace`. |
+| `--skip-hardlinked` | bool | `false` | With `--inplace`, skip files whose hardlink count is >1. Transcoding replaces the inode, breaking the hardlink and doubling disk usage — useful for ARR/seedbox setups. Overridden by `--force`. No effect without `--inplace`. |
+| `--skip-source-codec` | stringArray | _(none)_ | Skip files whose current video codec matches any entry in this list. Repeatable. Useful for protecting already-optimal files (e.g. `--skip-source-codec av1` never downgrades AV1). |
 | `--src` | string | `.` | Root directory to scan recursively for media files. |
+| `--subs` | string | `copy` | Subtitle stream handling. `copy` preserves all subtitle tracks; `drop` strips all subtitle streams from the output (`-sn`). |
 | `--suffix` | string | `.smelt` | Filename suffix for outputs written alongside the source (`<name><suffix><ext>`). Ignored for `--inplace` and `--output-dir`. |
 | `--to` | string | _(keep source)_ | Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags HEVC as `hvc1`. Mutually exclusive with `--inplace`. |
 | `--workers` | int | `0` | Maximum number of simultaneous ffmpeg processes. `0` means `runtime.NumCPU()`. |
@@ -158,8 +175,11 @@ Global Flags:
 
 ## `smelt tui`
 
-Launch the interactive bubbletea TUI. Scans the source directory and begins
-transcoding using the same flag set as `smelt transcode` (minus `--dry-run`).
+Launch the interactive bubbletea TUI. Opens an editable pre-flight screen where
+you can adjust codec, CRF, preset, hwaccel, and workers before starting. The
+concrete encoder resolved from `--hwaccel` is shown live. Press Enter to begin;
+jobs run in parallel with live progress, worker status, and logs.
+
 See [TUI.md](TUI.md) for the full layout and keybindings reference.
 
 ### Synopsis
@@ -171,36 +191,137 @@ smelt tui [flags]
 ### `--help` output
 
 ```
-Launch the interactive transcoding TUI. Scans the source directory and begins
-transcoding in parallel. Progress, worker status, and logs are displayed live.
-Press q or Ctrl+C to quit; active jobs are cancelled cleanly.
+Launch the interactive transcoding TUI. Scans the source directory and opens an
+editable configure screen — adjust codec, CRF, preset, hwaccel, and workers, and
+see the concrete encoder that --hwaccel resolves to. Press enter to start; jobs
+then run in parallel with live progress, worker status, and logs. Press q or
+Ctrl+C to cancel running jobs cleanly and quit.
 
 Usage:
   smelt tui [flags]
 
 Flags:
-      --audio-bitrate string     audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
-      --audio-codec string       audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
-      --codec string             target video codec: h264|h265|av1|vp9 (default "h265")
-      --crf int                  constant rate factor 0-51; lower = higher quality (default 23)
-      --ext strings              file extensions to match (default [mkv,mp4,avi])
-      --ffmpeg-arg stringArray   raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
-      --force                    re-transcode even if the output file already exists
-  -h, --help                     help for tui
-      --hwaccel string           hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
-      --inplace                  replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
-      --output-dir string        write output files to this directory instead of alongside source
-      --preset string            encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
-      --profile string           named profile preset from config; explicit flags still override it
-      --skip-hardlinked          with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
-      --src string               source directory to scan (default ".")
-      --suffix string            filename suffix for outputs written alongside the source (default ".smelt")
-      --to string                target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
-      --workers int              maximum parallel transcode jobs; 0 = runtime.NumCPU()
+      --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
+      --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
+      --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
+      --ext strings                     file extensions to match (default [mkv,mp4,avi])
+      --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+      --force                           re-transcode even if the output file already exists
+  -h, --help                            help for tui
+      --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
+      --output-dir string               write output files to this directory instead of alongside source
+      --preset string                   encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
+      --profile string                  named profile preset from config; explicit flags still override it
+      --skip-hardlinked                 with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
+      --skip-source-codec stringArray   skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)
+      --src string                      source directory to scan (default ".")
+      --subs string                     subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles) (default "copy")
+      --suffix string                   filename suffix for outputs written alongside the source (default ".smelt")
+      --to string                       target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
+      --workers int                     maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
+      --log-format string   log output format: auto|json|pretty (default "auto")
+      --log-level string    log level: debug|info|warn|error (default "info")
+```
+
+---
+
+## `smelt check`
+
+Scan a directory and probe each media file with ffprobe. Reports corrupt or
+unreadable files and files with no video stream. Useful as a library health
+check before or after a transcode run.
+
+### Synopsis
+
+```
+smelt check [flags]
+```
+
+### `--help` output
+
+```
+Scan a source directory and probe each matching file with ffprobe.
+
+Reports files that cannot be opened (corrupt container, read error) and files
+with no video stream. Exits 0 if all files are healthy, 1 if any are corrupt.
+
+Usage:
+  smelt check [flags]
+
+Examples:
+  smelt check --src /mnt/media
+  smelt check --src /mnt/media --ext mkv,mp4 --workers 4
+
+Flags:
+      --ext strings   file extensions to probe (default [mkv,mp4,avi])
+  -h, --help          help for check
+      --src string    source directory to scan (default ".")
+      --workers int   parallel probe jobs; 0 = runtime.NumCPU()
+
+Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
+      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
+      --log-format string   log output format: auto|json|pretty (default "auto")
+      --log-level string    log level: debug|info|warn|error (default "info")
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | All probed files are readable |
+| 1 | One or more files are corrupt or unreadable |
+
+---
+
+## `smelt history`
+
+Query the SQLite history database written by `smelt transcode` and `smelt tui`.
+Each record shows the completion time, status, encoder, CRF, elapsed time, and
+source file path. Useful for auditing what has been transcoded and verifying
+settings over time.
+
+### Synopsis
+
+```
+smelt history [flags]
+```
+
+### `--help` output
+
+```
+Query the SQLite history database and print recent transcode records.
+
+Each record shows when the transcode completed, its status, the encoder and
+settings used, how long it took, and the source file path. Useful for auditing
+what smelt has done and verifying encode settings over time.
+
+Usage:
+  smelt history [flags]
+
+Examples:
+  smelt history
+  smelt history --limit 50
+  smelt history --failed
+  smelt history --db /custom/path/history.db
+
+Flags:
+      --failed      show only failed transcodes
+  -h, --help        help for history
+      --limit int   number of most recent records to show (default 20)
+
+Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
+      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
 ```
@@ -254,10 +375,36 @@ Examples:
   smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
 
 Flags:
-      --name string              workflow name, used in the script header and lock file
-  -o, --out string               write the script to this file (made executable); default stdout
-      --schedule string          cron expression to run the script on a timer, e.g. "0 3 * * *" (requires --out)
-  (plus all `smelt transcode` flags)
+      --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
+      --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
+      --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
+      --ext strings                     file extensions to match (default [mkv,mp4,avi])
+      --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+      --force                           re-transcode even if the output file already exists
+  -h, --help                            help for workflow
+      --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
+      --name string                     workflow name, used in the script header and lock file
+  -o, --out string                      write the script to this file (made executable); default stdout
+      --output-dir string               write output files to this directory instead of alongside source
+      --preset string                   encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
+      --profile string                  named profile preset from config; explicit flags still override it
+      --schedule string                 cron expression to run the script on a timer, e.g. "0 3 * * *" (requires --out)
+      --skip-hardlinked                 with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
+      --skip-source-codec stringArray   skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)
+      --src string                      source directory to scan (default ".")
+      --subs string                     subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles) (default "copy")
+      --suffix string                   filename suffix for outputs written alongside the source (default ".smelt")
+      --to string                       target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
+      --workers int                     maximum parallel transcode jobs; 0 = runtime.NumCPU()
+
+Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
+      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
+      --log-format string   log output format: auto|json|pretty (default "auto")
+      --log-level string    log level: debug|info|warn|error (default "info")
 ```
 
 ---
@@ -281,7 +428,9 @@ Flags:
   -h, --help   help for config
 
 Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
 
@@ -317,7 +466,9 @@ Flags:
   -h, --help    help for init
 
 Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
 ```
@@ -348,7 +499,9 @@ Flags:
   -h, --help   help for version
 
 Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
       --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
 ```
@@ -356,7 +509,7 @@ Global Flags:
 ### Example output
 
 ```
-smelt v1.0.0 (go1.23.0, linux/amd64)
+smelt v1.0.0 (go1.26.3, linux/amd64)
 ```
 
 ---
@@ -374,6 +527,7 @@ uppercase and underscores. Flag precedence (highest to lowest):
 | Flag | Env var |
 |---|---|
 | `--assume-yes` | `SMELT_ASSUME_YES` |
+| `--db` | `SMELT_DB` |
 | `--log-level` | `SMELT_LOG_LEVEL` |
 | `--log-format` | `SMELT_LOG_FORMAT` |
 | `--src` | `SMELT_SRC` |
@@ -387,9 +541,11 @@ uppercase and underscores. Flag precedence (highest to lowest):
 | `--preset` | `SMELT_PRESET` |
 | `--audio-codec` | `SMELT_AUDIO_CODEC` |
 | `--audio-bitrate` | `SMELT_AUDIO_BITRATE` |
+| `--subs` | `SMELT_SUBS` |
 | `--workers` | `SMELT_WORKERS` |
 | `--inplace` | `SMELT_INPLACE` |
 | `--skip-hardlinked` | `SMELT_SKIP_HARDLINKED` |
+| `--skip-source-codec` | `SMELT_SKIP_SOURCE_CODEC` |
 | `--output-dir` | `SMELT_OUTPUT_DIR` |
 | `--profile` | `SMELT_PROFILE` |
 
