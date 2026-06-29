@@ -46,9 +46,6 @@ func runHistory(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("open history db: %w", err)
 	}
-	if database == nil {
-		return fmt.Errorf("history database is disabled (--db is empty)")
-	}
 	defer func() { _ = database.Close() }()
 
 	limit, _ := cmd.Flags().GetInt("limit")
@@ -79,14 +76,11 @@ func runHistory(cmd *cobra.Command, _ []string) error {
 	return tw.Flush()
 }
 
-func encoderLabel(encoder, backend string) string {
+func encoderLabel(encoder, _ string) string {
 	if encoder == "" {
 		return "(unknown)"
 	}
-	if backend != "" {
-		return encoder // e.g. hevc_nvenc
-	}
-	return encoder // software encoder like libx265
+	return encoder
 }
 
 func fmtElapsed(d time.Duration) string {

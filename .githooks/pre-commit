@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# Pre-commit: auto-format staged Go files, then vet and lint.
 set -euo pipefail
 
-staged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+# Collect staged Go files into an array — handles filenames with spaces.
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
 
-if [ -n "$staged" ]; then
-  # shellcheck disable=SC2086
-  gofmt -w $staged
-  # shellcheck disable=SC2086
-  git add $staged
+[ ${#staged[@]} -eq 0 ] && exit 0
+
+# Stash unstaged changes so gofmt doesn't pull WIP code into the commit.
+stashed=false
+if ! git diff --quiet; then
+  git stash -q --keep-index
+  stashed=true
 fi
+trap '[ "$stashed" = true ] && git stash pop -q 2>/dev/null || true' EXIT
 
-go vet ./...
+gofmt -w "${staged[@]}"
+git add "${staged[@]}"
 
+# golangci-lint includes govet in its default set; no need for a separate go vet.
 if command -v golangci-lint &>/dev/null; then
   golangci-lint run ./...
 else
+  go vet ./...
   echo "warning: golangci-lint not found; skipping lint (run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)"
 fi
