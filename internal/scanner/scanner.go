@@ -10,7 +10,7 @@ import (
 
 type MediaFile struct {
 	Path    string
-	RelPath string      // path relative to the scan root; used to mirror the tree into --output-dir
+	RelPath string // path relative to the scan root; used to mirror the tree into --output-dir
 	Ext     string
 	Size    int64
 	Mtime   int64       // modification time as unix seconds; used for DB-based skip on re-runs

@@ -49,7 +49,7 @@ func runHistory(cmd *cobra.Command, _ []string) error {
 	if database == nil {
 		return fmt.Errorf("history database is disabled (--db is empty)")
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	limit, _ := cmd.Flags().GetInt("limit")
 	failedOnly, _ := cmd.Flags().GetBool("failed")
@@ -64,10 +64,10 @@ func runHistory(cmd *cobra.Command, _ []string) error {
 	}
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "COMPLETED\tSTATUS\tENCODER\tCRF\tELAPSED\tSOURCE")
+	_, _ = fmt.Fprintln(tw, "COMPLETED\tSTATUS\tENCODER\tCRF\tELAPSED\tSOURCE")
 	for _, r := range records {
 		elapsed := time.Duration(r.ElapsedMs) * time.Millisecond
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
 			r.CompletedAt.Local().Format("2006-01-02 15:04:05"),
 			r.Status,
 			encoderLabel(r.Encoder, r.Backend),

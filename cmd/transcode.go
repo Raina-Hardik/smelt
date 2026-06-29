@@ -49,7 +49,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open history db: %w", err)
 	}
 	if database != nil {
-		defer database.Close()
+		defer func() { _ = database.Close() }()
 	}
 
 	files, err := scanner.Scan(cfg.Src, cfg.Ext)

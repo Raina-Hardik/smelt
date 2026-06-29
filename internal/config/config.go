@@ -19,23 +19,23 @@ type Config struct {
 	LogFormat string
 
 	// transcode section
-	Src            string
-	Ext            []string
-	Codec          string
-	CRF            int
-	Preset         string
-	AudioCodec     string // audio codec alias or "copy" (default copy = stream-copy)
-	AudioBitrate   string // e.g. "192k"; applied only when re-encoding audio
-	HWAccel        string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
-	InPlace        bool
+	Src              string
+	Ext              []string
+	Codec            string
+	CRF              int
+	Preset           string
+	AudioCodec       string // audio codec alias or "copy" (default copy = stream-copy)
+	AudioBitrate     string // e.g. "192k"; applied only when re-encoding audio
+	HWAccel          string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
+	InPlace          bool
 	SkipHardlinked   bool     // --inplace: skip files hardlinked elsewhere (avoid breaking the link)
 	SkipSourceCodecs []string // skip files whose current video codec is in this list (e.g. av1)
-	Force          bool   // re-transcode even when the output already exists
-	Container      string // --to: target container/format (e.g. mp4); empty keeps source
-	OutputDir      string
-	Suffix         string
-	Profile        string
-	ExtraArgs      []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
+	Force            bool     // re-transcode even when the output already exists
+	Container        string   // --to: target container/format (e.g. mp4); empty keeps source
+	OutputDir        string
+	Suffix           string
+	Profile          string
+	ExtraArgs        []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
 
 	SubtitleMode string // "copy" (default) | "drop"
 	DBPath       string // path to the SQLite history database; "" disables the DB
@@ -74,22 +74,22 @@ func Load() *Config {
 		LogLevel:  viper.GetString("smelt.log_level"),
 		LogFormat: viper.GetString("smelt.log_format"),
 
-		Src:            viper.GetString("transcode.src"),
-		Ext:            viper.GetStringSlice("transcode.ext"),
-		Codec:          viper.GetString("transcode.codec"),
-		CRF:            viper.GetInt("transcode.crf"),
-		Preset:         viper.GetString("transcode.preset"),
-		AudioCodec:     audioCodec,
-		AudioBitrate:   viper.GetString("transcode.audio_bitrate"),
-		HWAccel:        hwaccel,
-		InPlace:        viper.GetBool("transcode.inplace"),
+		Src:              viper.GetString("transcode.src"),
+		Ext:              viper.GetStringSlice("transcode.ext"),
+		Codec:            viper.GetString("transcode.codec"),
+		CRF:              viper.GetInt("transcode.crf"),
+		Preset:           viper.GetString("transcode.preset"),
+		AudioCodec:       audioCodec,
+		AudioBitrate:     viper.GetString("transcode.audio_bitrate"),
+		HWAccel:          hwaccel,
+		InPlace:          viper.GetBool("transcode.inplace"),
 		SkipHardlinked:   viper.GetBool("transcode.skip_hardlinked"),
 		SkipSourceCodecs: viper.GetStringSlice("transcode.skip_source_codecs"),
-		Force:          viper.GetBool("transcode.force"),
-		Container:      strings.TrimPrefix(viper.GetString("transcode.to"), "."),
-		OutputDir:      viper.GetString("transcode.output_dir"),
-		Suffix:         suffix,
-		Profile:        viper.GetString("transcode.profile"),
+		Force:            viper.GetBool("transcode.force"),
+		Container:        strings.TrimPrefix(viper.GetString("transcode.to"), "."),
+		OutputDir:        viper.GetString("transcode.output_dir"),
+		Suffix:           suffix,
+		Profile:          viper.GetString("transcode.profile"),
 		// Profile extra_args come first; CLI --ffmpeg-arg refine/append after.
 		ExtraArgs: append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
 

@@ -36,6 +36,7 @@ sudo pacman -S ffmpeg
 git clone https://github.com/Raina-Hardik/smelt
 cd smelt
 go mod download
+just install-hooks   # wire up the pre-commit hook (one-time)
 ```
 
 ---
@@ -78,6 +79,18 @@ go test -tags integration ./...
 These require ffmpeg and ffprobe on `$PATH` and may take several seconds.
 
 ---
+
+## Local Dev Hooks
+
+The pre-commit hook in `.githooks/pre-commit` auto-formats staged Go files with
+`gofmt`, runs `go vet`, and runs `golangci-lint`. Install it once after cloning:
+
+```bash
+just install-hooks
+```
+
+This sets `core.hooksPath = .githooks` in your local git config. The hook is
+non-blocking if `golangci-lint` is not on `$PATH` (a warning is printed instead).
 
 ## Linting
 
@@ -204,6 +217,35 @@ ffmpeg argument list.
 
 3. **Test it** — add a case to the `TestCodecFlag` table-driven test in
    `internal/ffmpeg/runner_test.go`.
+
+---
+
+## Releases
+
+Releases are built automatically by CI when a tag matching `v*` is pushed.
+The release job runs only after `test` and `lint` both pass.
+
+**To cut a release:**
+
+```bash
+just tag v1.2.3   # runs the full CI gate locally, then pushes the tag
+```
+
+The `just tag` recipe refuses to push if any local check fails.
+
+CI then cross-compiles five binaries and publishes them to the GitHub release:
+
+| Asset | OS | Arch |
+|---|---|---|
+| `smelt-linux-amd64` | Linux | x86-64 |
+| `smelt-linux-arm64` | Linux | ARM64 |
+| `smelt-windows-amd64.exe` | Windows | x86-64 |
+| `smelt-darwin-amd64` | macOS | Intel |
+| `smelt-darwin-arm64` | macOS | Apple Silicon |
+
+All Linux builds are fully static (`CGO_ENABLED=0`), so they run on both
+glibc-based (Ubuntu, Fedora) and musl-based (Alpine) distributions without
+any runtime dependency.
 
 ---
 

@@ -72,6 +72,11 @@ testdata:
 sample-env:
     bash scripts/build-smelt-dataset.sh
 
+# Install git hooks from .githooks/ (run once after cloning).
+install-hooks:
+    git config core.hooksPath .githooks
+    @echo "Git hooks installed from .githooks/"
+
 # Remove build artifacts.
 clean:
     rm -f smelt

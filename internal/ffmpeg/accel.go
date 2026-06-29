@@ -140,4 +140,3 @@ func probeEncoder(ctx context.Context, enc, backend string) bool {
 	probeCache[enc] = ok
 	return ok
 }
-

@@ -73,12 +73,12 @@ func Open(path string) (*DB, error) {
 		"PRAGMA foreign_keys=ON",
 	} {
 		if _, err := conn.Exec(pragma); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil, err
 		}
 	}
 	if _, err := conn.Exec(schema); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	return &DB{db: conn}, nil
@@ -132,7 +132,7 @@ func (d *DB) Recent(limit int, failedOnly bool) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Record
 	for rows.Next() {

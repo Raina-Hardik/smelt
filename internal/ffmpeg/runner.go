@@ -31,10 +31,10 @@ type EncodeSpec struct {
 	Container    string   // output container (e.g. mp4); drives container-specific muxer flags
 	Encoder      string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
 	Backend      string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
-	AudioCodec    string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
-	AudioBitrate  string   // e.g. "192k"; applied only when re-encoding audio
-	SubtitleMode  string   // "copy" (default) | "drop"; controls subtitle stream handling
-	ExtraArgs     []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
+	AudioCodec   string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
+	AudioBitrate string   // e.g. "192k"; applied only when re-encoding audio
+	SubtitleMode string   // "copy" (default) | "drop"; controls subtitle stream handling
+	ExtraArgs    []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -131,7 +131,7 @@ func buildArgs(src, dst string, spec EncodeSpec) []string {
 func streamMapArgs(spec EncodeSpec) []string {
 	args := []string{
 		"-map", "0:v:0", // primary video stream only (avoids multi-video-stream edge cases)
-		"-map", "0:a",   // all audio streams (preserves multi-track/multi-lang)
+		"-map", "0:a", // all audio streams (preserves multi-track/multi-lang)
 	}
 	if strings.EqualFold(spec.SubtitleMode, "drop") {
 		args = append(args, "-sn")
