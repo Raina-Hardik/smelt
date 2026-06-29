@@ -41,7 +41,7 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     strategy:
-      fail_fast: false
+      fail-fast: false
       matrix:
         include:
           - goos: linux
