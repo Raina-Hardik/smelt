@@ -10,10 +10,12 @@ import (
 
 type MediaFile struct {
 	Path    string
-	RelPath string // path relative to the scan root; used to mirror the tree into --output-dir
+	RelPath string      // path relative to the scan root; used to mirror the tree into --output-dir
 	Ext     string
 	Size    int64
-	Links   uint64 // hardlink count (st_nlink); >1 means the file is hardlinked elsewhere
+	Mtime   int64       // modification time as unix seconds; used for DB-based skip on re-runs
+	Mode    os.FileMode // permission bits; applied to the output so perms are preserved
+	Links   uint64      // hardlink count (st_nlink); >1 means the file is hardlinked elsewhere
 }
 
 // Scan walks root recursively and returns files whose extensions match the
@@ -44,6 +46,8 @@ func Scan(root string, extensions []string) ([]MediaFile, error) {
 			RelPath: filepath.FromSlash(path), // GlobWalk yields slash-separated paths
 			Ext:     ext,
 			Size:    info.Size(),
+			Mtime:   info.ModTime().Unix(),
+			Mode:    info.Mode(),
 			Links:   fileLinks(info),
 		})
 		return nil
