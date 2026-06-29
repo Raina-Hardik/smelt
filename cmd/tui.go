@@ -34,6 +34,14 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	database, err := openDB()
+	if err != nil {
+		return fmt.Errorf("open history db: %w", err)
+	}
+	if database != nil {
+		defer database.Close()
+	}
+
 	files, err := scanner.Scan(cfg.Src, cfg.Ext)
 	if err != nil {
 		return fmt.Errorf("scan %s: %w", cfg.Src, err)
@@ -42,7 +50,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)
 	}
 
-	files, _ = worker.Plan(cmd.Context(), files, cfg)
+	files, _ = worker.Plan(cmd.Context(), files, cfg, database)
 	if len(files) == 0 {
 		return fmt.Errorf("nothing to transcode; files are already up to date (use --force)")
 	}
@@ -54,7 +62,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	model := tui.New(cfg, files, cmd.Context())
+	model := tui.New(cfg, files, cmd.Context(), database)
 	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(cmd.Context()))
 	_, err = prog.Run()
 	return err

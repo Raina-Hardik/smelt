@@ -85,6 +85,9 @@ func transcodeArgs(cfg *config.Config) []string {
 	if cfg.AudioBitrate != "" {
 		args = append(args, flag("--audio-bitrate", cfg.AudioBitrate))
 	}
+	if cfg.SubtitleMode != "" && cfg.SubtitleMode != "copy" {
+		args = append(args, flag("--subs", cfg.SubtitleMode))
+	}
 	if cfg.Container != "" {
 		args = append(args, flag("--to", cfg.Container))
 	}
@@ -96,6 +99,9 @@ func transcodeArgs(cfg *config.Config) []string {
 	}
 	if cfg.SkipHardlinked {
 		args = append(args, "--skip-hardlinked")
+	}
+	for _, c := range cfg.SkipSourceCodecs {
+		args = append(args, flag("--skip-source-codec", c))
 	}
 	if cfg.Force {
 		args = append(args, "--force")

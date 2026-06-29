@@ -44,6 +44,14 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	}
 	configureLogger(cfg.LogLevel, cfg.LogFormat)
 
+	database, err := openDB()
+	if err != nil {
+		return fmt.Errorf("open history db: %w", err)
+	}
+	if database != nil {
+		defer database.Close()
+	}
+
 	files, err := scanner.Scan(cfg.Src, cfg.Ext)
 	if err != nil {
 		return fmt.Errorf("scan %s: %w", cfg.Src, err)
@@ -57,7 +65,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	// smart-skip target matches what will actually be encoded.
 	cfg.Codec = ffmpeg.ResolveCodec(cmd.Context(), cfg.Codec, cfg.HWAccel)
 
-	files, skipped := worker.Plan(cmd.Context(), files, cfg)
+	files, skipped := worker.Plan(cmd.Context(), files, cfg, database)
 	if skipped > 0 {
 		log.Info().Int("skipped", skipped).Msg("skipped up-to-date files (use --force to re-transcode)")
 	}
@@ -86,7 +94,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return worker.New(cfg).Run(cmd.Context(), files)
+	return worker.New(cfg, database).Run(cmd.Context(), files)
 }
 
 // addTranscodeFlags registers the flags shared between transcode and tui.
@@ -163,6 +171,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"ffmpeg-arg", nil,
 		"raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)",
 	)
+	cmd.Flags().String(
+		"subs", "copy",
+		"subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles)",
+	)
 }
 
 // bindTranscodeFlags binds the invoked command's flags to viper at run time.
@@ -189,6 +201,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.to", "to"},
 		{"transcode.profile", "profile"},
 		{"transcode.ffmpeg_args", "ffmpeg-arg"},
+		{"transcode.subs", "subs"},
 		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent
 	}
 	for _, b := range binds {

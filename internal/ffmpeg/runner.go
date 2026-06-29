@@ -31,9 +31,10 @@ type EncodeSpec struct {
 	Container    string   // output container (e.g. mp4); drives container-specific muxer flags
 	Encoder      string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
 	Backend      string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
-	AudioCodec   string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
-	AudioBitrate string   // e.g. "192k"; applied only when re-encoding audio
-	ExtraArgs    []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
+	AudioCodec    string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
+	AudioBitrate  string   // e.g. "192k"; applied only when re-encoding audio
+	SubtitleMode  string   // "copy" (default) | "drop"; controls subtitle stream handling
+	ExtraArgs     []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -112,12 +113,31 @@ func buildArgs(src, dst string, spec EncodeSpec) []string {
 	args := []string{"-hide_banner"}
 	args = append(args, preInputArgs(spec)...)
 	args = append(args, "-i", src)
+	args = append(args, streamMapArgs(spec)...)
 	args = append(args, videoFilterArgs(spec)...)
 	args = append(args, rateControlArgs(spec)...)
 	args = append(args, audioArgs(spec)...)
 	args = append(args, containerArgs(spec)...)
 	args = append(args, spec.ExtraArgs...)
 	args = append(args, "-y", dst)
+	return args
+}
+
+// streamMapArgs emits the -map flags that control which streams are included in
+// the output. We always select the primary video stream and all audio streams so
+// multi-track files are preserved. Subtitles are copied by default and dropped
+// with --subs=drop (or when the output container does not support them, handled
+// at the user level via --subs).
+func streamMapArgs(spec EncodeSpec) []string {
+	args := []string{
+		"-map", "0:v:0", // primary video stream only (avoids multi-video-stream edge cases)
+		"-map", "0:a",   // all audio streams (preserves multi-track/multi-lang)
+	}
+	if strings.EqualFold(spec.SubtitleMode, "drop") {
+		args = append(args, "-sn")
+	} else {
+		args = append(args, "-map", "0:s?", "-c:s", "copy") // optional: no error if no sub streams
+	}
 	return args
 }
 
@@ -430,6 +450,51 @@ func parseTime(line string) (time.Duration, bool) {
 // ProbeVideoCodec returns the codec_name of the first video stream (e.g.
 // "hevc", "h264", "av1", "vp9"), used to smart-skip files already in the target
 // codec. Errors propagate so callers can choose not to skip on probe failure.
+// FileHealth summarises the result of a quick ffprobe health check.
+type FileHealth struct {
+	VideoCodec string
+	HasVideo   bool
+	Duration   time.Duration
+}
+
+// ProbeHealth runs ffprobe against path and returns basic stream information.
+// An error means ffprobe could not open the file — i.e. the file is corrupt or
+// unreadable. A nil error with HasVideo=false means the container is valid but
+// carries no video stream (e.g. audio-only).
+func ProbeHealth(ctx context.Context, path string) (*FileHealth, error) {
+	out, err := exec.CommandContext(ctx, "ffprobe",
+		"-v", "error",
+		"-show_entries", "stream=codec_type,codec_name:format=duration",
+		"-of", "default=noprint_wrappers=1",
+		path,
+	).Output()
+	if err != nil {
+		return nil, err
+	}
+	info := &FileHealth{}
+	var lastType string
+	for _, line := range strings.Split(string(out), "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "codec_type":
+			lastType = v
+		case "codec_name":
+			if lastType == "video" && !info.HasVideo {
+				info.HasVideo = true
+				info.VideoCodec = v
+			}
+		case "duration":
+			if secs, err := strconv.ParseFloat(v, 64); err == nil {
+				info.Duration = time.Duration(secs * float64(time.Second))
+			}
+		}
+	}
+	return info, nil
+}
+
 func ProbeVideoCodec(ctx context.Context, path string) (string, error) {
 	out, err := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",

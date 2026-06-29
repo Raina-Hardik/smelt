@@ -113,6 +113,7 @@ func TestBuildArgs(t *testing.T) {
 	got := buildArgs("in.mkv", "out.mkv", spec)
 	want := []string{
 		"-hide_banner", "-i", "in.mkv",
+		"-map", "0:v:0", "-map", "0:a", "-map", "0:s?", "-c:s", "copy",
 		"-c:v", "libx265", "-crf", "23", "-preset", "medium",
 		"-c:a", "copy",
 		"-movflags", "+faststart",
@@ -120,6 +121,20 @@ func TestBuildArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("buildArgs =\n  %v\nwant\n  %v", got, want)
+	}
+}
+
+func TestBuildArgsSubsDrop(t *testing.T) {
+	spec := EncodeSpec{Codec: "h265", CRF: 23, SubtitleMode: "drop"}
+	got := buildArgs("in.mkv", "out.mkv", spec)
+	found := false
+	for _, a := range got {
+		if a == "-sn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("--subs=drop: expected -sn in args, got %v", got)
 	}
 }
 
