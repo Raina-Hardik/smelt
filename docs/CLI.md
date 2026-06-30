@@ -11,8 +11,8 @@ These flags are accepted by every command.
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `-y`, `--assume-yes` | bool | `false` | Skip confirmation prompts (assume yes) for destructive actions such as `--inplace`. |
-| `--config` | string | _(auto-search)_ | Path to config file. Searches `./config.yaml` then `$HOME/.config/smelt/config.yaml` when empty. |
-| `--db` | string | `$XDG_DATA_HOME/smelt/history.db` | Path to the SQLite history database. Set to `""` to disable history recording entirely. |
+| `--config` | string | _(auto-search)_ | Path to config file. Searches `./config.yaml` then the platform config dir (`~/.config/smelt/` on Linux, `~/Library/Application Support/smelt/` on macOS, `%AppData%\smelt\` on Windows) when empty. |
+| `--db` | string | _(platform data dir)_ | Path to the SQLite history database. Defaults to `~/.local/share/smelt/history.db` (Linux), `~/Library/Application Support/smelt/history.db` (macOS), or `%LocalAppData%\smelt\history.db` (Windows). Set to `""` to disable. |
 | `--log-format` | string | `auto` | Log output format: `auto` \| `json` \| `pretty`. `auto` selects `pretty` when stderr is a TTY, `json` otherwise. |
 | `--log-level` | string | `info` | Log verbosity: `debug` \| `info` \| `warn` \| `error`. |
 

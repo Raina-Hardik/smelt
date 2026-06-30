@@ -11,7 +11,10 @@ smelt searches for a config file in this order:
 
 1. Path given by `--config` (if provided)
 2. `./config.yaml` (current working directory)
-3. `$HOME/.config/smelt/config.yaml`
+3. Platform config directory:
+   - **Linux** — `$XDG_CONFIG_HOME/smelt/config.yaml` (default `~/.config/smelt/config.yaml`)
+   - **macOS** — `~/Library/Application Support/smelt/config.yaml`
+   - **Windows** — `%AppData%\smelt\config.yaml`
 
 If no file is found, built-in defaults apply. No error is raised.
 
@@ -124,7 +127,7 @@ smelt:
 | Attribute | Value |
 |---|---|
 | Type | `string` |
-| Default | `$XDG_DATA_HOME/smelt/history.db` (or `~/.local/share/smelt/history.db`) |
+| Default | Platform data directory — see below |
 | CLI flag | `--db` |
 | Env var | `SMELT_DB` |
 
@@ -133,6 +136,14 @@ failure) is recorded here with timestamps, encoder settings, elapsed time, and
 file sizes. Used by `smelt history` and for fast skip detection on `--inplace`
 re-runs (avoids re-probing files whose mtime hasn't changed). Set to `""` to
 disable history recording entirely.
+
+Default path per platform (respects `$XDG_DATA_HOME` on all platforms):
+
+| Platform | Default path |
+|---|---|
+| Linux | `$XDG_DATA_HOME/smelt/history.db` → `~/.local/share/smelt/history.db` |
+| macOS | `~/Library/Application Support/smelt/history.db` |
+| Windows | `%LocalAppData%\smelt\history.db` |
 
 ```yaml
 smelt:
