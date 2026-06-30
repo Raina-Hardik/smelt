@@ -32,6 +32,7 @@ Usage:
 
 Available Commands:
   check       Probe a directory for corrupt or unreadable media files
+  clean       Remove leftover .transcoded partial artifacts from interrupted runs
   completion  Generate the autocompletion script for the specified shell
   config      Manage smelt configuration
   help        Help about any command
@@ -229,6 +230,79 @@ Global Flags:
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
 ```
+
+---
+
+## `smelt clean`
+
+Remove leftover `.transcoded` partial artifacts from interrupted transcode runs.
+When smelt is killed mid-encode the temporary `<name>.transcoded<ext>` working
+file is normally deleted by the defer in `transcode()`. If the process is
+force-killed (SIGKILL, power loss, OOM) the cleanup never runs and orphaned
+partials accumulate alongside source files. `smelt clean` finds and removes them.
+
+### Synopsis
+
+```
+smelt clean [flags]
+```
+
+### Examples
+
+```bash
+# Show what would be removed, touch nothing
+smelt clean --src /mnt/media --dry-run
+
+# Remove all orphaned partial artifacts under /mnt/media
+smelt clean --src /mnt/media
+
+# Narrow to a specific extension
+smelt clean --src /mnt/media --ext mkv
+```
+
+### `--help` output
+
+```
+Remove leftover .transcoded partial artifacts from interrupted transcode runs.
+
+When smelt is killed mid-encode (SIGKILL, power loss, OOM) the transient
+working file (<name>.transcoded<ext>) is not cleaned up. This command scans
+--src for those files and deletes them. Use --dry-run first to preview.
+
+Usage:
+  smelt clean [flags]
+
+Examples:
+  smelt clean --src /mnt/media --dry-run
+  smelt clean --src /mnt/media
+  smelt clean --src /mnt/media --ext mkv
+
+Flags:
+      --dry-run       print files that would be removed without deleting anything
+      --ext strings   file extensions to scan (default [mkv,mp4,avi])
+  -h, --help          help for clean
+      --src string    source directory to scan (default ".")
+
+Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
+      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
+      --log-format string   log output format: auto|json|pretty (default "auto")
+      --log-level string    log level: debug|info|warn|error (default "info")
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | All matching artifacts removed (or nothing found) |
+| 1 | One or more files could not be removed |
+
+### Notes
+
+- Prints each removed path (or each path that _would_ be removed under `--dry-run`).
+- Without `-y` / `--assume-yes`, prompts for confirmation before deleting unless `--dry-run`.
+- Only matches files whose stem ends with `.transcoded` — it will not touch source files or finished outputs.
 
 ---
 

@@ -15,6 +15,7 @@ smelt/
 │   ├── transcode.go         `smelt transcode` — delegates to scanner + worker
 │   ├── tui.go               `smelt tui` — delegates to scanner + tui.Model
 │   ├── check.go             `smelt check` — parallel ffprobe health check
+│   ├── clean.go             `smelt clean` — remove orphaned .transcoded partial artifacts
 │   ├── history.go           `smelt history` — query the SQLite history DB
 │   ├── workflow.go          `smelt workflow` — emits a schedulable shell script
 │   ├── config.go            `smelt config init` — writes starter config.yaml
