@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/workflow"
@@ -43,8 +42,7 @@ func (s *Server) triggerRun(runID string, p workflow.Program) error {
 	cmd.Env = append(os.Environ(), "SMELT_RUN_ID="+runID)
 	cmd.Stdout = lf
 	cmd.Stderr = lf
-	// Start in its own process group so SIGTERM reaches all children.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
 		_ = lf.Close()
@@ -62,17 +60,4 @@ func (s *Server) triggerRun(runID string, p workflow.Program) error {
 	}()
 
 	return nil
-}
-
-// cancelRun sends SIGTERM to the process group of the running script.
-// Returns false if no live process was found for runID.
-func (s *Server) cancelRun(runID string) bool {
-	v, ok := s.procs.Load(runID)
-	if !ok {
-		return false
-	}
-	proc := v.(*os.Process)
-	// Negative PID targets the process group (set via Setpgid above).
-	_ = syscall.Kill(-proc.Pid, syscall.SIGTERM)
-	return true
 }

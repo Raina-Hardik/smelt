@@ -100,8 +100,10 @@ func Render(p Program, opts Options) string {
 	fmt.Fprintf(&b, "%s each --src %s --ext %s --name %s --run-id \"$RUN_ID\" | while IFS= read -r _smelt_file; do\n",
 		qbin, shellQuote(p.Src), shellQuote(strings.Join(p.Ext, ",")), shellQuote(name))
 
+	hasBody := false
 	hasIf := false
 	for _, r := range p.Rules {
+		hasBody = true
 		if len(r.When) == 0 {
 			// Catch-all: first match wins, so nothing after it can fire.
 			if hasIf {
@@ -121,6 +123,11 @@ func Render(p Program, opts Options) string {
 	}
 	if hasIf {
 		b.WriteString("\tfi\n")
+	}
+	// An empty while body is a syntax error in POSIX sh; emit a no-op when
+	// there are no rules so the script is always syntactically valid.
+	if !hasBody {
+		b.WriteString("\t:\n")
 	}
 	b.WriteString("done\n\n")
 
