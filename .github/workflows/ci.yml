@@ -42,9 +42,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: gh release create ${{ github.ref_name }} --generate-notes
+      - name: Create release (with retry)
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in 1 2 3; do
+            gh release create ${{ github.ref_name }} --generate-notes && break
+            echo "Attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
 
   release-upload:
     if: startsWith(github.ref, 'refs/tags/v')
