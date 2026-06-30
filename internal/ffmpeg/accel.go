@@ -157,7 +157,7 @@ func ResolveEncoder(ctx context.Context, codec, hwaccel string) (encoder, backen
 // user switches hwaccel in the TUI) gets a fresh result.
 func parallelProbe(ctx context.Context, codec string, backends []string) (encoder, backend string) {
 	type result struct {
-		idx    int // -1 = failed/cancelled
+		idx     int // -1 = failed/cancelled
 		enc, be string
 	}
 
