@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -152,15 +153,28 @@ func (d *DB) Recent(limit int, failedOnly bool) ([]Record, error) {
 	return out, rows.Err()
 }
 
-// DefaultPath returns the default database path:
-// $XDG_DATA_HOME/smelt/history.db, or ~/.local/share/smelt/history.db.
+// DefaultPath returns the platform-appropriate default database path.
+//
+// XDG_DATA_HOME is respected on all platforms. Platform fallbacks:
+//   - Linux/other: ~/.local/share/smelt/history.db
+//   - macOS:       ~/Library/Application Support/smelt/history.db
+//   - Windows:     %LocalAppData%\smelt\history.db
 func DefaultPath() string {
 	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
 		return filepath.Join(d, "smelt", "history.db")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "smelt-history.db"
+	switch runtime.GOOS {
+	case "windows":
+		if d := os.Getenv("LOCALAPPDATA"); d != "" {
+			return filepath.Join(d, "smelt", "history.db")
+		}
+	case "darwin":
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, "Library", "Application Support", "smelt", "history.db")
+		}
 	}
-	return filepath.Join(home, ".local", "share", "smelt", "history.db")
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "share", "smelt", "history.db")
+	}
+	return "smelt-history.db"
 }

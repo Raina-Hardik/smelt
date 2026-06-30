@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -48,7 +49,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(
 		&cfgFile, "config", "",
-		"path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml",
+		"path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)",
 	)
 	rootCmd.PersistentFlags().String(
 		"log-level", "info",
@@ -126,7 +127,12 @@ func initConfig() {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 		viper.AddConfigPath(".")
-		viper.AddConfigPath("$HOME/.config/smelt")
+		// os.UserConfigDir() returns the platform-appropriate config directory:
+		// $XDG_CONFIG_HOME or ~/.config on Linux, ~/Library/Application Support
+		// on macOS, %AppData% on Windows.
+		if d, err := os.UserConfigDir(); err == nil {
+			viper.AddConfigPath(filepath.Join(d, "smelt"))
+		}
 	}
 	viper.SetEnvPrefix("SMELT")
 	viper.AutomaticEnv()
