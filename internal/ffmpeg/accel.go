@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -51,8 +50,20 @@ func ResolveCodec(ctx context.Context, codec, hwaccel string) string {
 	// Probe all (codec, backend) pairs in parallel. codecHasHW[i] is set true
 	// if any backend works for chain[i]. Codec priority (chain order) is
 	// respected when picking the winner after all probes finish.
-	codecHasHW := make([]atomic.Bool, len(chain))
-	var wg sync.WaitGroup
+	//
+	// Early exit: once chain[0] (highest-priority codec) gets a hit we cancel
+	// every other probe — nothing in the chain can beat it.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		ci  int
+		hit bool
+	}
+
+	spawned := 0
+	ch := make(chan result, len(chain)*len(hwPriority))
+
 	for ci, c := range chain {
 		for _, b := range hwPriority {
 			enc := encoderName(c, b)
@@ -60,17 +71,27 @@ func ResolveCodec(ctx context.Context, codec, hwaccel string) string {
 				continue
 			}
 			ci, b, enc := ci, b, enc
-			wg.Go(func() {
-				if probeEncoder(ctx, enc, b) {
-					codecHasHW[ci].Store(true)
-				}
-			})
+			spawned++
+			go func() {
+				ch <- result{ci: ci, hit: probeEncoder(ctx, enc, b)}
+			}()
 		}
 	}
-	wg.Wait()
+
+	codecHasHW := make([]bool, len(chain))
+	for range spawned {
+		r := <-ch
+		if r.hit {
+			codecHasHW[r.ci] = true
+			if r.ci == 0 {
+				cancel() // highest-priority codec has hardware; stop waiting
+				return chain[0]
+			}
+		}
+	}
 
 	for i, c := range chain {
-		if codecHasHW[i].Load() {
+		if codecHasHW[i] {
 			return c
 		}
 	}
@@ -129,33 +150,55 @@ func ResolveEncoder(ctx context.Context, codec, hwaccel string) (encoder, backen
 // parallelProbe probes all backends for codec simultaneously and returns the
 // encoder+backend with the highest priority (lowest index in backends) that
 // actually works. Returns ("", "") when nothing works.
+//
+// Early exit: once a result arrives for the highest-priority backend (index 0)
+// the remaining probes are cancelled — there is nothing better to wait for.
+// Probes cancelled this way are not cached so a later probe (e.g. after the
+// user switches hwaccel in the TUI) gets a fresh result.
 func parallelProbe(ctx context.Context, codec string, backends []string) (encoder, backend string) {
-	// hits[i] is non-nil when backends[i] has a working encoder for codec.
-	// Each goroutine writes to a distinct index, so no mutex is needed here.
-	type hit struct{ enc, be string }
-	hits := make([]*hit, len(backends))
+	type result struct {
+		idx    int // -1 = failed/cancelled
+		enc, be string
+	}
 
-	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Count only the backends that have an encoder for this codec.
+	spawned := 0
+	ch := make(chan result, len(backends))
+
 	for i, b := range backends {
 		enc := encoderName(codec, b)
 		if enc == "" {
 			continue
 		}
 		i, b, enc := i, b, enc
-		wg.Go(func() {
+		spawned++
+		go func() {
 			if probeEncoder(ctx, enc, b) {
-				hits[i] = &hit{enc: enc, be: b}
+				ch <- result{idx: i, enc: enc, be: b}
+			} else {
+				ch <- result{idx: -1}
 			}
-		})
+		}()
 	}
-	wg.Wait()
 
-	for _, h := range hits {
-		if h != nil {
-			return h.enc, h.be
+	bestIdx := len(backends) // sentinel: no winner yet
+	bestEnc, bestBe := "", ""
+
+	for range spawned {
+		r := <-ch
+		if r.idx >= 0 && r.idx < bestIdx {
+			bestIdx = r.idx
+			bestEnc, bestBe = r.enc, r.be
+			if bestIdx == 0 {
+				cancel() // index 0 is the highest priority; nothing can beat it
+				return bestEnc, bestBe
+			}
 		}
 	}
-	return "", ""
+	return bestEnc, bestBe
 }
 
 // encoderName returns the ffmpeg encoder for a codec alias + backend, or "".
@@ -206,11 +249,14 @@ func probeEncoder(ctx context.Context, enc, backend string) bool {
 
 	ok := exec.CommandContext(probeCtx, "ffmpeg", args...).Run() == nil
 
-	// Two goroutines may race to write the same key when a cache miss happens
-	// concurrently. Both produce the same answer for the same encoder, so the
-	// last write is harmless.
-	probeMu.Lock()
-	probeCache[enc] = ok
-	probeMu.Unlock()
+	// Only cache a definitive result. ctx cancellation (parent cancelled because
+	// a higher-priority probe already won) is not evidence that this encoder is
+	// absent — skip the cache so a later probe gets a real answer.
+	// A probeCtx timeout (8 s) IS definitive: the driver hung, so cache false.
+	if ctx.Err() == nil {
+		probeMu.Lock()
+		probeCache[enc] = ok
+		probeMu.Unlock()
+	}
 	return ok
 }
