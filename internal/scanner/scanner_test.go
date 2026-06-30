@@ -68,6 +68,28 @@ func TestScanReportsHardlinks(t *testing.T) {
 	}
 }
 
+// TestScanSkipsCircularSymlink verifies that a directory symlink pointing back
+// to an ancestor does not cause an infinite walk or an ELOOP error. This
+// reproduces the mise trusted-configs circular-symlink issue observed on Linux.
+func TestScanSkipsCircularSymlink(t *testing.T) {
+	if os.Getenv("GOOS") == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.mkv"))
+	// Create a symlink inside root that points back to root — circular.
+	if err := os.Symlink(root, filepath.Join(root, "loop")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	files, err := Scan(root, []string{"mkv"})
+	if err != nil {
+		t.Fatalf("Scan should not fail on circular symlinks, got: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d: %v", len(files), files)
+	}
+}
+
 func mustWrite(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
