@@ -95,7 +95,9 @@ func runClean(cmd *cobra.Command, _ []string) error {
 	if !assumeYes {
 		fmt.Fprintf(os.Stderr, "Found %d artifact(s) to remove. Proceed? [y/N] ", len(found))
 		var resp string
-		fmt.Fscan(os.Stdin, &resp)
+		if _, err := fmt.Fscan(os.Stdin, &resp); err != nil {
+			return fmt.Errorf("reading confirmation: %w", err)
+		}
 		if strings.ToLower(resp) != "y" {
 			log.Info().Msg("aborted")
 			return nil
