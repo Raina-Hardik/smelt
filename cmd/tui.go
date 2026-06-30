@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/tui"
 	"github.com/Raina-Hardik/smelt/internal/worker"
@@ -29,6 +30,9 @@ func init() {
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
+	if err := ffmpeg.CheckDeps(); err != nil {
+		return err
+	}
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		return err

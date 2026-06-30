@@ -450,6 +450,16 @@ func parseTime(line string) (time.Duration, bool) {
 // ProbeVideoCodec returns the codec_name of the first video stream (e.g.
 // "hevc", "h264", "av1", "vp9"), used to smart-skip files already in the target
 // codec. Errors propagate so callers can choose not to skip on probe failure.
+// CheckDeps returns an error if ffmpeg or ffprobe are not found on PATH.
+func CheckDeps() error {
+	for _, bin := range []string{"ffmpeg", "ffprobe"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf("%s not found on PATH — install ffmpeg (https://ffmpeg.org/download.html)", bin)
+		}
+	}
+	return nil
+}
+
 // FileHealth summarises the result of a quick ffprobe health check.
 type FileHealth struct {
 	VideoCodec string
