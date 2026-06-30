@@ -13,7 +13,7 @@ import (
 )
 
 var doCmd = &cobra.Command{
-	Use:   "do <file> <subcommand> [flags...]",
+	Use:   "do <file> <subcommand>",
 	Short: "Apply a smelt subcommand to a single file",
 	Long: `Apply a smelt subcommand to a single file rather than scanning a directory.
 Typically called from a generated program script body:
@@ -36,6 +36,11 @@ Subcommands:
 
 func init() {
 	addTranscodeFlags(doCmd)
+	// src, ext, and workers are directory-scanning flags that don't apply to a
+	// single-file command; hide them so the help screen isn't misleading.
+	_ = doCmd.Flags().MarkHidden("src")
+	_ = doCmd.Flags().MarkHidden("ext")
+	_ = doCmd.Flags().MarkHidden("workers")
 	doCmd.PreRunE = bindTranscodeFlags
 	rootCmd.AddCommand(doCmd)
 }

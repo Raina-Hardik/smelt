@@ -49,7 +49,7 @@ Available Commands:
 
 Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
   -h, --help                help for smelt
       --log-format string   log output format: auto|json|pretty (default "auto")
@@ -147,7 +147,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -235,7 +235,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -295,7 +295,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -351,7 +351,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -404,7 +404,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -542,7 +542,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -594,8 +594,9 @@ inside generated program scripts:
         fi
     done
 
-With --run-id, registers the run in the history DB so the dashboard can
-track the job before any file processing starts.
+With --run-id, registers the run and its file list in the history DB (one
+queued job row per file) so the dashboard can track the job from the moment
+it starts, before any file is processed. --name labels the run row.
 
 Usage:
   smelt each [flags]
@@ -612,7 +613,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -734,7 +735,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -798,7 +799,7 @@ Subcommands:
   check       run a health check on the file (exits 1 if corrupt)
 
 Usage:
-  smelt do <file> <subcommand> [flags...]
+  smelt do <file> <subcommand> [flags]
 
 Examples:
   smelt do movie.mkv transcode --codec h265 --crf 23 -y
@@ -809,7 +810,6 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
-      --ext strings                     file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for do
@@ -820,15 +820,13 @@ Flags:
       --profile string                  named profile preset from config; explicit flags still override it
       --skip-hardlinked                 with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
       --skip-source-codec stringArray   skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)
-      --src string                      source directory to scan (default ".")
       --subs string                     subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles) (default "copy")
       --suffix string                   filename suffix for outputs written alongside the source (default ".smelt")
       --to string                       target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
-      --workers int                     maximum parallel transcode jobs; 0 = runtime.NumCPU()
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -890,7 +888,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -926,7 +924,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -964,7 +962,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
@@ -997,7 +995,7 @@ Flags:
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
-      --config string       path to config file; searches ./config.yaml then $HOME/.config/smelt/config.yaml
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
       --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
       --log-format string   log output format: auto|json|pretty (default "auto")
       --log-level string    log level: debug|info|warn|error (default "info")
