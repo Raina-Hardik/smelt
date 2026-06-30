@@ -11,6 +11,8 @@ import (
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 )
 
+func p(s string) string { return filepath.FromSlash(s) }
+
 func TestOutputPath(t *testing.T) {
 	cases := []struct {
 		name string
@@ -18,19 +20,19 @@ func TestOutputPath(t *testing.T) {
 		cfg  *config.Config
 		want string
 	}{
-		{"default smelt suffix", scanner.MediaFile{Path: "/media/a.mkv"}, &config.Config{Suffix: ".smelt"}, "/media/a.smelt.mkv"},
-		{"inplace returns original", scanner.MediaFile{Path: "/media/a.mkv"}, &config.Config{InPlace: true, Suffix: ".smelt"}, "/media/a.mkv"},
-		{"custom suffix", scanner.MediaFile{Path: "/media/a.mp4"}, &config.Config{Suffix: ".enc"}, "/media/a.enc.mp4"},
-		{"no extension", scanner.MediaFile{Path: "/media/a"}, &config.Config{Suffix: ".smelt"}, "/media/a.smelt"},
+		{"default smelt suffix", scanner.MediaFile{Path: p("/media/a.mkv")}, &config.Config{Suffix: ".smelt"}, p("/media/a.smelt.mkv")},
+		{"inplace returns original", scanner.MediaFile{Path: p("/media/a.mkv")}, &config.Config{InPlace: true, Suffix: ".smelt"}, p("/media/a.mkv")},
+		{"custom suffix", scanner.MediaFile{Path: p("/media/a.mp4")}, &config.Config{Suffix: ".enc"}, p("/media/a.enc.mp4")},
+		{"no extension", scanner.MediaFile{Path: p("/media/a")}, &config.Config{Suffix: ".smelt"}, p("/media/a.smelt")},
 		{"output-dir mirrors rel tree, keeps name",
-			scanner.MediaFile{Path: "/media/movies/a.mkv", RelPath: "movies/a.mkv"},
-			&config.Config{Suffix: ".smelt", OutputDir: "/out"}, "/out/movies/a.mkv"},
+			scanner.MediaFile{Path: p("/media/movies/a.mkv"), RelPath: p("movies/a.mkv")},
+			&config.Config{Suffix: ".smelt", OutputDir: p("/out")}, p("/out/movies/a.mkv")},
 		{"--to swaps container ext",
-			scanner.MediaFile{Path: "/media/a.mkv"},
-			&config.Config{Suffix: ".smelt", Container: "mp4"}, "/media/a.smelt.mp4"},
+			scanner.MediaFile{Path: p("/media/a.mkv")},
+			&config.Config{Suffix: ".smelt", Container: "mp4"}, p("/media/a.smelt.mp4")},
 		{"--to with output-dir swaps ext in mirrored tree",
-			scanner.MediaFile{Path: "/media/movies/a.mkv", RelPath: "movies/a.mkv"},
-			&config.Config{Suffix: ".smelt", OutputDir: "/out", Container: "mp4"}, "/out/movies/a.mp4"},
+			scanner.MediaFile{Path: p("/media/movies/a.mkv"), RelPath: p("movies/a.mkv")},
+			&config.Config{Suffix: ".smelt", OutputDir: p("/out"), Container: "mp4"}, p("/out/movies/a.mp4")},
 	}
 	for _, c := range cases {
 		if got := OutputPath(c.file, c.cfg); got != c.want {
@@ -41,12 +43,14 @@ func TestOutputPath(t *testing.T) {
 
 func TestTransientPath(t *testing.T) {
 	// alongside-source default: transient sits next to the final file
-	if got := transientPath("/media/a.smelt.mkv", "/media/a.mkv"); got != "/media/a.transcoded.mkv" {
-		t.Errorf("transientPath = %q, want /media/a.transcoded.mkv", got)
+	want := filepath.FromSlash("/media/a.transcoded.mkv")
+	if got := transientPath(filepath.FromSlash("/media/a.smelt.mkv"), filepath.FromSlash("/media/a.mkv")); got != want {
+		t.Errorf("transientPath = %q, want %q", got, want)
 	}
 	// output-dir: transient lives in the destination dir, not the source dir
-	if got := transientPath("/out/movies/a.mkv", "/media/movies/a.mkv"); got != "/out/movies/a.transcoded.mkv" {
-		t.Errorf("transientPath = %q, want /out/movies/a.transcoded.mkv", got)
+	want = filepath.FromSlash("/out/movies/a.transcoded.mkv")
+	if got := transientPath(filepath.FromSlash("/out/movies/a.mkv"), filepath.FromSlash("/media/movies/a.mkv")); got != want {
+		t.Errorf("transientPath = %q, want %q", got, want)
 	}
 }
 
