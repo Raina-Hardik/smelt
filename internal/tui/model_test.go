@@ -22,12 +22,18 @@ func keyMsg(s string) tea.KeyMsg {
 func newTestModel(t *testing.T, paths ...string) Model {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel) // tear down the pool goroutine if a test starts it
+	t.Cleanup(cancel)
 	files := make([]scanner.MediaFile, len(paths))
 	for i, p := range paths {
 		files[i] = scanner.MediaFile{Path: p}
 	}
-	return New(&config.Config{Workers: 2, Codec: "h264", HWAccel: "auto", Suffix: ".smelt"}, files, ctx, nil)
+	// Each call gets its own Config so tests cannot mutate each other's state.
+	// Simulate a completed scan so tests that exercise pre-flight/running
+	// behaviour don't need to send a scanDoneMsg first.
+	m := New(&config.Config{Workers: 2, Codec: "h264", HWAccel: "auto", Suffix: ".smelt"}, ctx, nil)
+	m.initFileItems(files)
+	m.scanning = false
+	return m
 }
 
 // running returns a model already past the pre-flight screen.

@@ -27,6 +27,13 @@ type completeMsg struct {
 }
 type allDoneMsg struct{}
 
+// scanDoneMsg carries the result of the background scan+plan.
+type scanDoneMsg struct {
+	files   []scanner.MediaFile
+	skipped int
+	err     error
+}
+
 // resolvedMsg carries the concrete encoder/backend the pre-flight probe picked,
 // tagged with the codec/hwaccel it was probed for so a stale result (from a
 // since-changed setting) can be ignored.
@@ -123,7 +130,9 @@ type Model struct {
 	errCount   int
 	width      int
 	height     int
-	started    bool // user confirmed the pre-flight screen; pool is running
+	scanning   bool   // scan+plan running in background; pre-flight not shown yet
+	scanErr    error  // non-nil if scan failed; shows error screen
+	started    bool   // user confirmed the pre-flight screen; pool is running
 	quitting   bool
 	cancelling bool // q/Ctrl+C pressed: draining in-flight work before exit
 	finished   bool // the worker pool drained on its own (allDoneMsg seen)
@@ -131,53 +140,73 @@ type Model struct {
 	showHelp   bool
 }
 
-func New(cfg *config.Config, files []scanner.MediaFile, ctx context.Context, database *db.DB) Model {
-	events := make(chan tea.Msg, len(files)*4+4)
-
-	// Own a cancellable child of the caller's context so an in-app quit (q/Q)
-	// can cancel in-flight ffmpeg children, not just an external SIGINT.
+// New creates a TUI model that opens immediately in a "Scanning…" state.
+// The scan and plan run as a background tea.Cmd via Init so the terminal is
+// taken over before any blocking filesystem walk begins.
+func New(cfg *config.Config, ctx context.Context, database *db.DB) Model {
+	// Own a cancellable child so q/Q can cancel in-flight ffmpeg children.
 	ctx, cancel := context.WithCancel(ctx)
 
-	fileItems := make([]fileItem, len(files))
-	fileIndex := make(map[string]int, len(files))
-	listItems := make([]list.Item, len(files))
-
-	for i, f := range files {
-		name := filepath.Base(f.Path)
-		fileItems[i] = fileItem{
-			file:   f,
-			status: statusPending,
-			prog:   newProgressBar(),
-		}
-		fileIndex[f.Path] = i
-		listItems[i] = listEntry{name: name, status: statusPending}
-	}
-
-	l := list.New(listItems, list.NewDefaultDelegate(), 80, 12)
+	l := list.New(nil, list.NewDefaultDelegate(), 80, 12)
 	l.Title = "file queue"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
-	l.SetShowHelp(false) // we render our own status bar
+	l.SetShowHelp(false)
 
 	return Model{
-		cfg:       cfg,
-		db:        database,
-		files:     files,
-		fileItems: fileItems,
-		fileIndex: fileIndex,
-		list:      l,
-		events:    events,
-		ctx:       ctx,
-		cancel:    cancel,
+		cfg:      cfg,
+		db:       database,
+		list:     l,
+		ctx:      ctx,
+		cancel:   cancel,
+		scanning: true,
 	}
+}
+
+// initFileItems populates the file list once the scan completes. Called from
+// Update on scanDoneMsg; safe because the pool has not started yet.
+func (m *Model) initFileItems(files []scanner.MediaFile) {
+	m.files = files
+	m.events = make(chan tea.Msg, len(files)*4+4)
+	m.fileItems = make([]fileItem, len(files))
+	m.fileIndex = make(map[string]int, len(files))
+	listItems := make([]list.Item, len(files))
+	for i, f := range files {
+		name := filepath.Base(f.Path)
+		m.fileItems[i] = fileItem{file: f, status: statusPending, prog: newProgressBar()}
+		m.fileIndex[f.Path] = i
+		listItems[i] = listEntry{name: name, status: statusPending}
+	}
+	m.list.SetItems(listItems)
 }
 
 // ── bubbletea interface ───────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	// Probe the encoder up front so the pre-flight screen can show the concrete
-	// choice. The pool isn't started until the user confirms (see runPool).
-	return m.resolveCmd()
+	// Both commands run concurrently off the UI goroutine. The scan+plan result
+	// arrives as scanDoneMsg; the encoder probe as resolvedMsg.
+	return tea.Batch(m.resolveCmd(), m.scanCmd())
+}
+
+// scanCmd walks the source directory and builds the transcode plan off-thread.
+func (m Model) scanCmd() tea.Cmd {
+	cfg := m.cfg
+	database := m.db
+	ctx := m.ctx
+	return func() tea.Msg {
+		files, err := scanner.Scan(cfg.Src, cfg.Ext)
+		if err != nil {
+			return scanDoneMsg{err: fmt.Errorf("scan %s: %w", cfg.Src, err)}
+		}
+		if len(files) == 0 {
+			return scanDoneMsg{err: fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)}
+		}
+		todo, skipped := worker.Plan(ctx, files, cfg, database)
+		if len(todo) == 0 {
+			return scanDoneMsg{err: fmt.Errorf("nothing to transcode — all outputs already exist (use --force to re-encode)")}
+		}
+		return scanDoneMsg{files: todo, skipped: skipped}
+	}
 }
 
 // resolveCmd probes the hardware encoder off the UI goroutine, for the current
@@ -215,6 +244,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// List text sits inside a bordered+padded box; leave room for both
 		// (2 border + 2 padding) so its rows never wrap against the frame.
 		m.list.SetSize(m.panelWidth()-4, m.listHeight())
+		return m, nil
+
+	case scanDoneMsg:
+		m.scanning = false
+		if msg.err != nil {
+			m.scanErr = msg.err
+			return m, nil
+		}
+		m.initFileItems(msg.files)
+		if msg.skipped > 0 {
+			m.logs = append(m.logs, fmt.Sprintf("skipped %d already up-to-date file(s)", msg.skipped))
+		}
 		return m, nil
 
 	case resolvedMsg:
@@ -293,18 +334,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.handleRunningKey(msg)
 }
 
-// handlePreflightKey runs on the editable pre-flight screen, before any job has
-// started: navigate fields, adjust values, then start or abort.
+// handlePreflightKey runs before any job has started: navigate fields, adjust
+// values, then start or abort. q/Ctrl+C always work; everything else is gated
+// on the scan having completed successfully.
 func (m Model) handlePreflightKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	}
+	// Still scanning or scan failed — only q works.
+	if m.scanning || m.scanErr != nil {
+		return m, nil
+	}
 	switch msg.String() {
 	case "enter", "s":
 		m.pool = worker.New(m.cfg, m.db)
 		m.started = true
 		m.launch()
 		return m, listenForEvent(m.events)
-	case "q", "ctrl+c":
-		m.quitting = true // nothing running yet; just exit
-		return m, tea.Quit
 	case "down", "j", "tab":
 		m.field = (m.field + 1) % confFieldCount
 		return m, nil
@@ -467,6 +515,12 @@ func (m Model) View() string {
 	if m.showHelp {
 		return m.helpView()
 	}
+	if m.scanning {
+		return m.scanningView()
+	}
+	if m.scanErr != nil {
+		return m.scanErrView()
+	}
 	if !m.started {
 		return m.preflightView()
 	}
@@ -566,6 +620,20 @@ func (m Model) listHeight() int {
 		h = 3
 	}
 	return h
+}
+
+func (m Model) scanningView() string {
+	content := theme.Title.Render("⚡ smelt") + "\n\n" +
+		theme.Subtitle.Render("scanning "+m.cfg.Src+"…") + "\n\n" +
+		theme.Help.Render("q to abort")
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, theme.Box.Render(content))
+}
+
+func (m Model) scanErrView() string {
+	content := theme.Title.Render("⚡ smelt — error") + "\n\n" +
+		theme.StatusErr.Render(m.scanErr.Error()) + "\n\n" +
+		theme.Help.Render("q to quit")
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, theme.Box.Render(content))
 }
 
 // preflightView is the editable pre-start screen: static context (src/output)
