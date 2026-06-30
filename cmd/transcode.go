@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
@@ -43,7 +44,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	}
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
-		return err
+		return exitErr(2, err)
 	}
 	configureLogger(cfg.LogLevel, cfg.LogFormat)
 
@@ -97,7 +98,50 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return worker.New(cfg, database).Run(cmd.Context(), files)
+	runID := cfg.RunID
+	if runID != "" && database != nil {
+		paths := make([]string, len(files))
+		for i, f := range files {
+			paths[i] = f.Path
+		}
+		if err := database.StartRun(runID, "", len(files)); err != nil {
+			log.Warn().Err(err).Msg("db: could not register run")
+			runID = ""
+		} else if err := database.AddJobs(runID, paths); err != nil {
+			log.Warn().Err(err).Msg("db: could not register jobs")
+		}
+	}
+
+	pool := worker.New(cfg, database)
+	if runID != "" && database != nil {
+		var ok, failed atomic.Int64
+		pool.RunTracked(cmd.Context(), files, runID,
+			nil,
+			func(f scanner.MediaFile, err error) {
+				if err != nil {
+					failed.Add(1)
+					log.Error().Err(err).Str("file", f.Path).Msg("failed")
+				} else {
+					ok.Add(1)
+					log.Info().Str("file", f.Path).Msg("done")
+				}
+			},
+		)
+		okN, failedN := int(ok.Load()), int(failed.Load())
+		_ = database.FinishRun(runID, okN, failedN, skipped)
+		if failedN == len(files) {
+			return exitErr(4, fmt.Errorf("%d file(s) failed to transcode", failedN))
+		}
+		if failedN > 0 {
+			return exitErr(3, fmt.Errorf("%d file(s) failed to transcode", failedN))
+		}
+		return nil
+	}
+
+	if err := pool.Run(cmd.Context(), files); err != nil {
+		return exitErr(3, err)
+	}
+	return nil
 }
 
 // addTranscodeFlags registers the flags shared between transcode and tui.

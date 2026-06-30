@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
@@ -54,6 +55,18 @@ func bindCheckFlags(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// checkOneFile probes a single file and returns an error if it is corrupt.
+func checkOneFile(ctx context.Context, path string) error {
+	info, err := ffmpeg.ProbeHealth(ctx, path)
+	if err != nil {
+		return fmt.Errorf("corrupt or unreadable: %w", err)
+	}
+	if !info.HasVideo {
+		log.Warn().Str("file", path).Msg("no video stream")
 	}
 	return nil
 }

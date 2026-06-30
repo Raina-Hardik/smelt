@@ -130,9 +130,9 @@ type Model struct {
 	errCount   int
 	width      int
 	height     int
-	scanning   bool   // scan+plan running in background; pre-flight not shown yet
-	scanErr    error  // non-nil if scan failed; shows error screen
-	started    bool   // user confirmed the pre-flight screen; pool is running
+	scanning   bool  // scan+plan running in background; pre-flight not shown yet
+	scanErr    error // non-nil if scan failed; shows error screen
+	started    bool  // user confirmed the pre-flight screen; pool is running
 	quitting   bool
 	cancelling bool // q/Ctrl+C pressed: draining in-flight work before exit
 	finished   bool // the worker pool drained on its own (allDoneMsg seen)

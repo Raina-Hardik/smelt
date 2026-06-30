@@ -51,7 +51,7 @@ func Script(cfg *config.Config, opts Options) string {
 	b.WriteString("fi\n\n")
 
 	b.WriteString(shellQuote(bin) + " transcode \\\n")
-	args := transcodeArgs(cfg)
+	args := TranscodeArgs(cfg)
 	for i, a := range args {
 		cont := " \\"
 		if i == len(args)-1 {
@@ -68,9 +68,9 @@ func CrontabLine(scriptPath, schedule string) string {
 	return fmt.Sprintf("%s %s >> %s.log 2>&1", schedule, shellQuote(scriptPath), scriptPath)
 }
 
-// transcodeArgs renders the resolved config as `smelt transcode` flags, fully
-// expanded so the script doesn't depend on a config file or profile at run time.
-func transcodeArgs(cfg *config.Config) []string {
+// TranscodeArgs renders cfg as `smelt transcode` flags, fully expanded so the
+// script doesn't depend on a config file or profile at run time.
+func TranscodeArgs(cfg *config.Config) []string {
 	args := []string{
 		flag("--src", cfg.Src),
 		flag("--ext", strings.Join(cfg.Ext, ",")),

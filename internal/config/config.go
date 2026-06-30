@@ -42,7 +42,25 @@ type Config struct {
 
 	// CLI-only flags (not in config.yaml)
 	DryRun    bool
-	AssumeYes bool // -y: skip destructive-action confirmation prompts
+	AssumeYes bool   // -y: skip destructive-action confirmation prompts
+	RunID     string // --run-id: ties this run to a dashboard tracking row in the DB
+}
+
+// Defaults returns a *Config populated with the same built-in defaults that
+// Load() applies when no flags or config file are present. Use this as the
+// starting point when constructing a Config programmatically (e.g. in the
+// server) rather than calling Load(), which reads global viper state.
+// Call Validate() on the result after filling in the fields you care about.
+func Defaults() *Config {
+	return &Config{
+		Workers:      runtime.NumCPU(),
+		Suffix:       ".smelt",
+		HWAccel:      "auto",
+		AudioCodec:   "copy",
+		SubtitleMode: "copy",
+		LogLevel:     "info",
+		LogFormat:    "auto",
+	}
 }
 
 // Load reads the current viper state and returns a fully resolved Config.
@@ -98,6 +116,7 @@ func Load() *Config {
 
 		DryRun:    viper.GetBool("transcode.dry_run"),
 		AssumeYes: viper.GetBool("smelt.assume_yes"),
+		RunID:     viper.GetString("smelt.run_id"),
 	}
 }
 

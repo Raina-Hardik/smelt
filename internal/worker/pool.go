@@ -107,6 +107,40 @@ func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 	return nil
 }
 
+// RunTracked is like RunWithCallbacks but also upserts per-file progress into
+// the history DB. runID must match a row already inserted via db.StartRun;
+// call db.FinishRun after this returns to close the run record.
+// onProgress and onComplete may be nil.
+func (p *Pool) RunTracked(
+	ctx context.Context,
+	files []scanner.MediaFile,
+	runID string,
+	onProgress func(ffmpeg.ProgressEvent),
+	onComplete func(scanner.MediaFile, error),
+) {
+	wrapped := func(ev ffmpeg.ProgressEvent) {
+		if p.db != nil {
+			_ = p.db.UpdateJob(runID, ev.FilePath, "running", ev.Percent, "")
+		}
+		if onProgress != nil {
+			onProgress(ev)
+		}
+	}
+	wrappedDone := func(f scanner.MediaFile, err error) {
+		if p.db != nil {
+			status := "done"
+			if err != nil {
+				status = "failed"
+			}
+			_ = p.db.UpdateJob(runID, f.Path, status, 1.0, "")
+		}
+		if onComplete != nil {
+			onComplete(f, err)
+		}
+	}
+	p.RunWithCallbacks(ctx, files, wrapped, wrappedDone)
+}
+
 // RunWithCallbacks is like Run but fires onProgress and onComplete for each
 // file so callers (e.g. the TUI) can react to individual events.
 func (p *Pool) RunWithCallbacks(

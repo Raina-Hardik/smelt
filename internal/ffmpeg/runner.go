@@ -536,6 +536,62 @@ func probeDuration(ctx context.Context, path string) (time.Duration, error) {
 	return time.Duration(secs * float64(time.Second)), nil
 }
 
+// FileAttrs carries per-file attributes used by the smelt match command.
+type FileAttrs struct {
+	VideoCodec string
+	AudioCodec string
+	Height     int64
+	Width      int64
+	BitRate    int64 // kbps, overall container bitrate
+	DurationS  float64
+}
+
+// ProbeAttrs queries a file for the attributes used by smelt match.
+func ProbeAttrs(ctx context.Context, path string) (*FileAttrs, error) {
+	out, err := exec.CommandContext(ctx, "ffprobe",
+		"-v", "error",
+		"-show_entries", "stream=codec_type,codec_name,height,width:format=bit_rate,duration",
+		"-of", "default=noprint_wrappers=1",
+		path,
+	).Output()
+	if err != nil {
+		return nil, err
+	}
+	a := &FileAttrs{}
+	var lastType string
+	for _, line := range strings.Split(string(out), "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "codec_type":
+			lastType = v
+		case "codec_name":
+			if lastType == "video" && a.VideoCodec == "" {
+				a.VideoCodec = v
+			} else if lastType == "audio" && a.AudioCodec == "" {
+				a.AudioCodec = v
+			}
+		case "height":
+			if lastType == "video" {
+				a.Height, _ = strconv.ParseInt(v, 10, 64)
+			}
+		case "width":
+			if lastType == "video" {
+				a.Width, _ = strconv.ParseInt(v, 10, 64)
+			}
+		case "bit_rate":
+			if br, err := strconv.ParseInt(v, 10, 64); err == nil {
+				a.BitRate = br / 1000
+			}
+		case "duration":
+			a.DurationS, _ = strconv.ParseFloat(v, 64)
+		}
+	}
+	return a, nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

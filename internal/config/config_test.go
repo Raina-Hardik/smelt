@@ -108,3 +108,44 @@ func TestValidateRejectsInplaceWithOutputDir(t *testing.T) {
 		t.Error("expected --inplace + --output-dir to be rejected")
 	}
 }
+
+// TestDirectConstruction documents the server construction path: build a
+// *Config from a struct literal (or Defaults) + field assignment, then call
+// Validate(). No viper involvement — Validate() only calls viper.IsSet when
+// Profile != "", which the server never sets in v1.
+func TestDirectConstruction(t *testing.T) {
+	viper.Reset() // confirm no viper state is read
+
+	cfg := Defaults()
+	cfg.Src = "/mnt/media"
+	cfg.Ext = []string{"mkv", "mp4"}
+	cfg.Codec = "h265"
+	cfg.CRF = 23
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("server-constructed config should validate cleanly: %v", err)
+	}
+	if cfg.Workers <= 0 {
+		t.Error("Defaults() should populate Workers from runtime.NumCPU")
+	}
+	if cfg.AudioCodec != "copy" {
+		t.Errorf("Defaults() AudioCodec = %q, want copy", cfg.AudioCodec)
+	}
+}
+
+func TestDefaultsMatchLoadDefaults(t *testing.T) {
+	viper.Reset()
+	fromDefaults := Defaults()
+	fromLoad := Load()
+
+	// These fields must agree — they are the documented defaults in both paths.
+	if fromDefaults.HWAccel != fromLoad.HWAccel {
+		t.Errorf("HWAccel: Defaults=%q Load=%q", fromDefaults.HWAccel, fromLoad.HWAccel)
+	}
+	if fromDefaults.AudioCodec != fromLoad.AudioCodec {
+		t.Errorf("AudioCodec: Defaults=%q Load=%q", fromDefaults.AudioCodec, fromLoad.AudioCodec)
+	}
+	if fromDefaults.Suffix != fromLoad.Suffix {
+		t.Errorf("Suffix: Defaults=%q Load=%q", fromDefaults.Suffix, fromLoad.Suffix)
+	}
+}
