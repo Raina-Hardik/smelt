@@ -23,7 +23,7 @@ smelt/
     ├── config/
     │   └── config.go        Config struct + Load() — reads viper state
     ├── scanner/
-    │   ├── scanner.go       Scan() — doublestar walk → []MediaFile (path/size/mtime/mode/links)
+    │   ├── scanner.go       Scan() — filepath.WalkDir → []MediaFile (path/size/mtime/mode/links)
     │   └── links_{unix,other}.go  hardlink-count helper (build-tagged)
     ├── db/
     │   └── db.go            Open(WAL) — Insert/IsDone/Recent; Record struct
@@ -98,10 +98,15 @@ CLI flags / config.yaml / env vars
    and config.yaml into a `*Config` struct. All subsequent stages receive this
    struct; they never read viper directly.
 
-2. **Scan** — `scanner.Scan(root, exts)` calls `doublestar.GlobWalk` on an
-   `os.DirFS(root)` filesystem. It returns a `[]scanner.MediaFile` slice
-   containing the absolute path, extension, and file size of every match.
-   Scan is intentionally single-threaded and fast; it is not the bottleneck.
+2. **Scan** — `scanner.Scan(root, exts)` uses `filepath.WalkDir` to walk the
+   source tree. It returns a `[]scanner.MediaFile` slice containing the
+   absolute path, relative path, extension, size, mtime, mode, and hardlink
+   count of every match. Symlinked directories are never followed (prevents
+   circular-symlink infinite walks, e.g. mise `trusted-configs`); symlinked
+   files are resolved via `os.Stat` so ARR/seedbox setups work correctly.
+   Per-entry errors (permissions, broken symlinks) are skipped silently; only
+   a failure to access root itself is returned. Scan is single-threaded and
+   fast; it is not the bottleneck.
 
 3. **Worker pool** — `worker.New(cfg, db)` constructs a `Pool` with a
    `semaphore.Weighted` of size `cfg.Workers` and a pausable dispatch gate. The
