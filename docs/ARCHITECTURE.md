@@ -255,8 +255,13 @@ case *ffmpeg.OSError:
 ```
 tui.Model.Init()
     │
-    └── return resolveCmd()       ← probes the encoder for the pre-flight screen
-                                    (the pool is NOT started yet)
+    └── return tea.Batch(resolveCmd(), scanCmd())
+            resolveCmd  ← probes the encoder off-thread; sends resolvedMsg
+            scanCmd     ← scanner.Scan + worker.Plan off-thread; sends scanDoneMsg
+
+  ── scanning state (TUI is open, scan running in background) ──
+    scanDoneMsg arrives → file list built; pre-flight screen shown
+    (or scanDoneMsg.err → error screen shown, only q works)
 
   ── editable pre-flight screen ──
     user edits codec/crf/preset/hwaccel/workers, then presses enter/s
