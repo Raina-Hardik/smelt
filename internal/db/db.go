@@ -82,6 +82,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_run ON jobs(run_id, status);
+
+CREATE TABLE IF NOT EXISTS programs (
+    id         TEXT    PRIMARY KEY,
+    name       TEXT    NOT NULL DEFAULT '',
+    schedule   TEXT    NOT NULL DEFAULT '',
+    src        TEXT    NOT NULL,
+    ext        TEXT    NOT NULL DEFAULT 'mkv,mp4,avi',
+    rules_json TEXT    NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 `
 
 // Open opens (or creates) the SQLite database at path.
@@ -412,4 +423,139 @@ func DefaultPath() string {
 		return filepath.Join(home, ".local", "share", "smelt", "history.db")
 	}
 	return "smelt-history.db"
+}
+
+// ProgramRecord is a row from the programs table.
+// RulesJSON holds the rules as a JSON-encoded []workflow.Rule — the server
+// layer (internal/server) is responsible for marshal/unmarshal so this package
+// stays free of the workflow dependency.
+type ProgramRecord struct {
+	ID        string
+	Name      string
+	Schedule  string
+	Src       string
+	Ext       string // comma-separated, e.g. "mkv,mp4,avi"
+	RulesJSON string // raw JSON []Rule
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// CreateProgram inserts a new program row.
+func (d *DB) CreateProgram(id, name, schedule, src, ext, rulesJSON string) error {
+	now := time.Now().Unix()
+	_, err := d.db.Exec(
+		`INSERT INTO programs (id, name, schedule, src, ext, rules_json, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?)`,
+		id, name, schedule, src, ext, rulesJSON, now, now,
+	)
+	return err
+}
+
+// GetProgram returns a single program by ID, or nil if not found.
+func (d *DB) GetProgram(id string) (*ProgramRecord, error) {
+	row := d.db.QueryRow(
+		`SELECT id, name, schedule, src, ext, rules_json, created_at, updated_at
+		 FROM programs WHERE id=?`, id,
+	)
+	return scanProgramRow(row)
+}
+
+// ListPrograms returns all programs ordered by name.
+func (d *DB) ListPrograms() ([]ProgramRecord, error) {
+	rows, err := d.db.Query(
+		`SELECT id, name, schedule, src, ext, rules_json, created_at, updated_at
+		 FROM programs ORDER BY name`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []ProgramRecord
+	for rows.Next() {
+		p, err := scanProgramRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, rows.Err()
+}
+
+// UpdateProgram replaces a program's mutable fields.
+func (d *DB) UpdateProgram(id, name, schedule, src, ext, rulesJSON string) error {
+	_, err := d.db.Exec(
+		`UPDATE programs SET name=?, schedule=?, src=?, ext=?, rules_json=?, updated_at=?
+		 WHERE id=?`,
+		name, schedule, src, ext, rulesJSON, time.Now().Unix(), id,
+	)
+	return err
+}
+
+// DeleteProgram removes a program by ID.
+func (d *DB) DeleteProgram(id string) error {
+	_, err := d.db.Exec(`DELETE FROM programs WHERE id=?`, id)
+	return err
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanProgramRow(r rowScanner) (*ProgramRecord, error) {
+	var p ProgramRecord
+	var createdAt, updatedAt int64
+	if err := r.Scan(&p.ID, &p.Name, &p.Schedule, &p.Src, &p.Ext, &p.RulesJSON, &createdAt, &updatedAt); err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	p.CreatedAt = time.Unix(createdAt, 0)
+	p.UpdatedAt = time.Unix(updatedAt, 0)
+	return &p, nil
+}
+
+// RecentRuns returns the most recent runs, optionally filtered to a status.
+func (d *DB) RecentRuns(limit int, status string) ([]RunRecord, error) {
+	q := `SELECT run_id, name, started_at, finished_at, status, total, ok, failed, skipped
+	      FROM runs`
+	args := []any{}
+	if status != "" {
+		q += " WHERE status=?"
+		args = append(args, status)
+	}
+	q += " ORDER BY started_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanRunRows(rows)
+}
+
+// GetRun returns a single run by ID, or nil if not found.
+func (d *DB) GetRun(runID string) (*RunRecord, error) {
+	row := d.db.QueryRow(
+		`SELECT run_id, name, started_at, finished_at, status, total, ok, failed, skipped
+		 FROM runs WHERE run_id=?`, runID,
+	)
+	var r RunRecord
+	var startedAt int64
+	var finishedAt *int64
+	if err := row.Scan(&r.RunID, &r.Name, &startedAt, &finishedAt,
+		&r.Status, &r.Total, &r.OK, &r.Failed, &r.Skipped); err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r.StartedAt = time.Unix(startedAt, 0)
+	if finishedAt != nil {
+		t := time.Unix(*finishedAt, 0)
+		r.FinishedAt = &t
+	}
+	return &r, nil
 }
