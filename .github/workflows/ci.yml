@@ -92,10 +92,7 @@ jobs:
           go build \
             -ldflags="-s -w -X github.com/Raina-Hardik/smelt/cmd.version=${GITHUB_REF_NAME}" \
             -o "${{ matrix.asset }}" .
-      - name: Checksum
-        run: sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
-      - name: Upload
-        run: gh release upload ${{ github.ref_name }} "${{ matrix.asset }}" "${{ matrix.asset }}.sha256"
+      - run: gh release upload ${{ github.ref_name }} ${{ matrix.asset }}
         env:
           GH_TOKEN: ${{ github.token }}
 
