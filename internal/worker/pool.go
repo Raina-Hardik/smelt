@@ -317,14 +317,15 @@ func isSkippedSource(cur string, skipCodecs []string) bool {
 	return false
 }
 
-// isOwnOutput reports whether path looks like a file smelt itself produced,
-// i.e. its name stem ends with the output suffix (e.g. "movie.smelt.mkv").
+// isOwnOutput reports whether path looks like a file smelt itself produced:
+// either a finished output ("movie.smelt.mkv") or a leftover transient artifact
+// from an interrupted run ("movie.transcoded.mkv").
 func isOwnOutput(path, suffix string) bool {
-	if suffix == "" {
-		return false
-	}
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	return strings.HasSuffix(stem, suffix)
+	if strings.HasSuffix(stem, transientSuffix) {
+		return true
+	}
+	return suffix != "" && strings.HasSuffix(stem, suffix)
 }
 
 // transientPath is where ffmpeg writes while encoding. It sits in the final
