@@ -414,47 +414,103 @@ Global Flags:
 
 ## `smelt workflow`
 
-Generates a self-contained, human-editable shell script that runs a `smelt
-transcode`. There is no separate workflow engine — the script *is* the workflow.
-It includes an overlap guard (`flock`) so scheduled runs never stack, and
-expands the resolved config (including any `--profile`) into explicit flags so
-the script doesn't depend on a config file at run time.
+Generates a self-contained, human-editable shell script. Two modes:
+
+- **Rule mode** (`--rule`): renders a per-file decision pipeline using the four
+  program primitives (`each` / `match` / `do` / `finish-run`). Each `--rule` is
+  evaluated in order; the first match wins.
+- **Simple mode** (no `--rule`): renders a single `smelt transcode` invocation.
+  Accepts every `smelt transcode` flag to define the job.
+
+In both modes the script includes a `flock` overlap guard (cron-safe), an
+optional `gum` banner, and run-ID tracking for the history dashboard.
 
 ### Synopsis
 
-Accepts every `smelt transcode` flag to define the job, plus:
+```
+smelt workflow [flags]
+```
+
+### Flag reference
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `--rule` | string | _(none)_ | Rule in manifest syntax. Repeatable; first match wins. Switches to rule mode. |
 | `-o`, `--out` | string | _(stdout)_ | Write the script to this file and make it executable. |
 | `--name` | string | `smelt-workflow` | Name used in the script header and the `flock` lock file. |
 | `--schedule` | string | _(none)_ | Cron expression. Prints a ready-to-paste crontab line. Requires `--out`. |
 
+In simple mode, all `smelt transcode` flags are also accepted.
+
+### Rule syntax
+
+```
+[when <field> <op> <value> [and <field> <op> <value>...]] do <action> [flags]
+```
+
+| Field | Matches |
+|---|---|
+| `codec` | Video codec (`hevc`, `h264`, `av1`, `vp9`) |
+| `audio` | First audio codec (`aac`, `opus`, `ac3`) |
+| `height` / `width` | Frame dimensions in pixels |
+| `bitrate` | Overall bitrate in kbps |
+| `duration` | Duration in seconds |
+| `ext` | File extension without dot (`mkv`, `mp4`) |
+
+Ops: `eq`, `ne`, `gt`, `lt`, `ge`, `le`. Actions: `transcode [flags]`, `check`, `skip`.
+
 ### Examples
 
 ```bash
-# Print a workflow script to stdout
-smelt workflow --src /mnt/media --codec h265
+# Rule mode — per-file decision pipeline written to a cron-scheduled file
+smelt workflow --src /mnt/media \
+    --rule "when codec ne hevc and height gt 1080 do transcode --codec h265 --crf 24" \
+    --rule "when codec ne hevc do transcode --codec h265 --crf 23" \
+    --rule "do skip" \
+    --name nightly --schedule "0 3 * * *" -o nightly.sh
 
-# Write an executable nightly job and show the crontab line to install
+# Simple mode — single transcode invocation
+smelt workflow --src /mnt/media --codec h265 -o nightly.sh
 smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
 ```
 
 ### `--help` output
 
 ```
-Generate a self-contained, human-editable shell script that runs a smelt
-transcode. The script is plain — it IS the workflow; there is no separate engine.
-It includes an overlap guard (flock) so scheduled runs never stack.
+Generate a self-contained, human-editable shell script that runs smelt.
 
-Accepts every 'smelt transcode' flag to define the job. With --out the script is
-written to a file and made executable; otherwise it is printed to stdout. With
---schedule a ready-to-paste crontab line is printed (requires --out).
+Two modes:
+
+  Rule mode (--rule): renders a per-file decision pipeline. Each --rule is
+  evaluated in order; the first matching rule wins. Rules follow the manifest
+  syntax:
+
+    [when <field> <op> <value> [and ...]] do <action> [flags]
+
+  Fields: codec, audio, height, width, bitrate, duration, ext
+  Ops:    eq, ne, gt, lt, ge, le
+  Actions: transcode [flags] | check | skip
+
+  Simple mode (no --rule): renders a single 'smelt transcode' invocation.
+  Accepts every 'smelt transcode' flag to configure the job.
+
+In both modes the script includes a flock overlap guard (cron-safe), an
+optional gum banner, and run-ID tracking for the history dashboard. With
+--out the script is written to a file and made executable; otherwise it is
+printed to stdout. With --schedule a ready-to-paste crontab line is printed
+(requires --out).
 
 Usage:
   smelt workflow [flags]
 
 Examples:
+  # Rule mode — per-file decision pipeline
+  smelt workflow --src /mnt/media \
+      --rule "when codec ne hevc and height gt 1080 do transcode --codec h265 --crf 24" \
+      --rule "when codec ne hevc do transcode --codec h265 --crf 23" \
+      --name nightly --schedule "0 3 * * *" -o nightly.sh
+
+  # Simple mode — single transcode invocation
   smelt workflow --src /mnt/media --codec h265 -o nightly.sh
   smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
 
@@ -474,6 +530,7 @@ Flags:
       --output-dir string               write output files to this directory instead of alongside source
       --preset string                   encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
       --profile string                  named profile preset from config; explicit flags still override it
+      --rule stringArray                rule in manifest syntax; repeatable, first match wins (switches to rule mode)
       --schedule string                 cron expression to run the script on a timer, e.g. "0 3 * * *" (requires --out)
       --skip-hardlinked                 with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
       --skip-source-codec stringArray   skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)

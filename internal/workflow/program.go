@@ -231,6 +231,11 @@ func renderRuleLine(r Rule) string {
 	return b.String()
 }
 
+// ParseRule parses a single rule line in manifest syntax back into a Rule.
+// It is the inverse of renderRuleLine and is used by cmd/workflow to parse
+// --rule flag values.
+func ParseRule(line string) (Rule, error) { return parseRuleLine(line) }
+
 // parseRuleLine parses a single manifest rule line back into a Rule.
 func parseRuleLine(line string) (Rule, error) {
 	var r Rule

@@ -159,6 +159,46 @@ func TestParseErrorOnMissingBlock(t *testing.T) {
 	}
 }
 
+func TestParseRuleValid(t *testing.T) {
+	cases := []struct {
+		line   string
+		fields int
+		cmd    string
+	}{
+		{"when codec ne hevc do transcode --codec h265 --crf 23", 1, "transcode"},
+		{"when codec ne hevc and height gt 1080 do transcode --codec h265 --crf 24", 2, "transcode"},
+		{"do skip", 0, "skip"},
+		{"do check", 0, "check"},
+	}
+	for _, c := range cases {
+		r, err := ParseRule(c.line)
+		if err != nil {
+			t.Errorf("ParseRule(%q): %v", c.line, err)
+			continue
+		}
+		if len(r.When) != c.fields {
+			t.Errorf("ParseRule(%q): got %d conditions, want %d", c.line, len(r.When), c.fields)
+		}
+		if r.Do.Cmd != c.cmd {
+			t.Errorf("ParseRule(%q): cmd = %q, want %q", c.line, r.Do.Cmd, c.cmd)
+		}
+	}
+}
+
+func TestParseRuleInvalid(t *testing.T) {
+	bad := []string{
+		"when codec ne do transcode",   // condition missing value
+		"when codec ne hevc transcode", // missing 'do'
+		"",                             // empty
+		"do",                           // missing action
+	}
+	for _, line := range bad {
+		if _, err := ParseRule(line); err == nil {
+			t.Errorf("ParseRule(%q) should have errored", line)
+		}
+	}
+}
+
 func TestScriptBackwardCompat(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Src = "/mnt/media"
