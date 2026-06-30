@@ -249,13 +249,17 @@ func probeEncoder(ctx context.Context, enc, backend string) bool {
 
 	ok := exec.CommandContext(probeCtx, "ffmpeg", args...).Run() == nil
 
-	// Only cache a definitive result. ctx cancellation (parent cancelled because
-	// a higher-priority probe already won) is not evidence that this encoder is
-	// absent — skip the cache so a later probe gets a real answer.
-	// A probeCtx timeout (8 s) IS definitive: the driver hung, so cache false.
-	if ctx.Err() == nil {
+	// Only cache successful probes. A failure might be transient — the NVENC
+	// driver briefly unavailable after a sibling probe just finished, a timeout
+	// caused by driver initialisation under load, etc. Caching false would lock
+	// the encoder out for the entire TUI session, causing silent software
+	// fallback on the next probe attempt. Absence of a cache entry means "retry".
+	//
+	// ctx cancellation (parent cancelled because a higher-priority probe already
+	// won) is not evidence of absence either — skip those regardless.
+	if ok && ctx.Err() == nil {
 		probeMu.Lock()
-		probeCache[enc] = ok
+		probeCache[enc] = true
 		probeMu.Unlock()
 	}
 	return ok
