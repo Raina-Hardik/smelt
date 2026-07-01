@@ -167,6 +167,18 @@ fix/<short-description>
 docs/<short-description>
 ```
 
+Design notes, brainstorms, and half-baked proposals do **not** belong on
+`master`. Keep them on long-lived idea branches so they stay available without
+polluting the mainline:
+
+```
+ideas/<topic>   # design docs, implementation sketches, "what if we…" writeups
+exp/<topic>     # experimental / flaky spikes not ready for review
+```
+
+For example, the surgical DV/HDR design lives on `ideas/surgical-mode`
+(`docs/ideas-implementation.md`) rather than being merged to `master`.
+
 ---
 
 ## Adding a New Transcode Profile
