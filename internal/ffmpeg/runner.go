@@ -17,7 +17,9 @@ type ProgressEvent struct {
 	FilePath string
 	Current  time.Duration
 	Total    time.Duration
-	Percent  float64 // 0.0–1.0; 0 if total is unknown
+	Percent  float64       // 0.0–1.0; 0 if total is unknown
+	Speed    float64       // ffmpeg's realtime multiplier (e.g. 1.02 for "1.02x"); 0 if unknown
+	ETA      time.Duration // estimated time remaining; 0 if Total or Speed is unknown
 }
 
 // EncodeSpec is the resolved input contract for one ffmpeg invocation. It is
@@ -58,6 +60,7 @@ func (e *OSError) Error() string { return fmt.Sprintf("OS error for %q: %v", e.F
 func (e *OSError) Unwrap() error { return e.Err }
 
 var timeRe = regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
+var speedRe = regexp.MustCompile(`speed=\s*([\d.]+)x`)
 
 // Run transcodes src → dst using spec, calling onProgress for each parsed
 // progress line. onProgress may be nil. ctx cancellation kills ffmpeg.
@@ -89,6 +92,12 @@ func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(
 					ev.Percent = float64(cur) / float64(total)
 					if ev.Percent > 1 {
 						ev.Percent = 1
+					}
+				}
+				if speed, ok := parseSpeed(line); ok {
+					ev.Speed = speed
+					if total > cur && speed > 0 {
+						ev.ETA = time.Duration(float64(total-cur) / speed)
 					}
 				}
 				onProgress(ev)
@@ -445,6 +454,18 @@ func parseTime(line string) (time.Duration, bool) {
 		time.Duration(s)*time.Second +
 		time.Duration(cs)*10*time.Millisecond
 	return d, true
+}
+
+func parseSpeed(line string) (float64, bool) {
+	m := speedRe.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	speed, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	return speed, true
 }
 
 // ProbeVideoCodec returns the codec_name of the first video stream (e.g.

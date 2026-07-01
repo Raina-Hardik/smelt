@@ -189,3 +189,16 @@ func TestParseTime(t *testing.T) {
 		t.Error("expected no match on a line without time=")
 	}
 }
+
+func TestParseSpeed(t *testing.T) {
+	speed, ok := parseSpeed("frame=  120 fps= 24 time=00:01:23.45 bitrate=1000kbits/s speed=1.02x")
+	if !ok {
+		t.Fatal("expected a match")
+	}
+	if speed != 1.02 {
+		t.Errorf("parseSpeed = %v, want 1.02", speed)
+	}
+	if _, ok := parseSpeed("no speed field on this line"); ok {
+		t.Error("expected no match on a line without speed=")
+	}
+}

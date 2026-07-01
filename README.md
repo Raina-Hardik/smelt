@@ -125,6 +125,36 @@ See [docs/CONFIG.md](docs/CONFIG.md) for the full schema and key reference.
 
 ---
 
+## Planned / Under Consideration
+
+The core tool targets straightforward container/codec transcoding. Complex
+source material — Dolby Vision, HDR10(+), multi-layer/multi-track editorial
+formats — has failure modes the simple ffmpeg pipeline doesn't handle: a
+naive re-encode silently drops the DV RPU layer, mangles mastering-display
+metadata, or otherwise degrades the source. These are real gaps, not
+oversights, and they're intentionally out of scope for now.
+
+Ideas being considered for a later "surgical mode" — a separate,
+explicitly-opted-into path for source-aware handling, distinct from the
+default transcode flow:
+
+- **Dolby Vision passthrough** — extract/inject RPU via `dovi_tool` around
+  the encode (profile 8.1 today; others later) instead of dropping the layer.
+- **HDR10/HDR10+ metadata preservation** — carry mastering-display and
+  content-light-level (and HDR10+ dynamic) metadata through re-encodes
+  instead of losing it.
+- **Source-complexity detection** — probe for these cases up front and warn
+  (or refuse) rather than silently producing a degraded file.
+- Possible shape: a `--preserve-dv` / `--surgical` flag or a dedicated
+  `smelt` subcommand that opts into the extra external-tool pipeline, kept
+  separate from the default single-ffmpeg-invocation flow so the common case
+  stays simple and dependency-light.
+
+Nothing here is scheduled — this is a place to collect ideas before design
+work starts.
+
+---
+
 ## Documentation
 
 | Document | Contents |

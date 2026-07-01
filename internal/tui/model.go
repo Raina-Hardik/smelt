@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/db"
@@ -95,6 +96,7 @@ type fileItem struct {
 	file    scanner.MediaFile
 	status  fileStatus
 	percent float64
+	eta     time.Duration
 	prog    progress.Model
 }
 
@@ -273,6 +275,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.fileItems[idx].status = statusActive
 		m.fileItems[idx].percent = msg.ev.Percent
+		m.fileItems[idx].eta = msg.ev.ETA
 		m.list.SetItem(idx, listEntry{
 			name:   filepath.Base(msg.ev.FilePath),
 			status: statusActive,

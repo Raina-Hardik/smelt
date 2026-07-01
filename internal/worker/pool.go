@@ -82,6 +82,8 @@ func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 			log.Debug().
 				Str("file", filepath.Base(ev.FilePath)).
 				Int("pct", int(ev.Percent*100)).
+				Float64("speed", ev.Speed).
+				Dur("eta", ev.ETA).
 				Msg("progress")
 		},
 		func(f scanner.MediaFile, err error) {
@@ -120,7 +122,11 @@ func (p *Pool) RunTracked(
 ) {
 	wrapped := func(ev ffmpeg.ProgressEvent) {
 		if p.db != nil {
-			_ = p.db.UpdateJob(runID, ev.FilePath, "running", ev.Percent, "")
+			speed := ""
+			if ev.Speed > 0 {
+				speed = fmt.Sprintf("%.2fx", ev.Speed)
+			}
+			_ = p.db.UpdateJob(runID, ev.FilePath, "running", ev.Percent, speed)
 		}
 		if onProgress != nil {
 			onProgress(ev)
