@@ -32,6 +32,7 @@ type allDoneMsg struct{}
 type scanDoneMsg struct {
 	files   []scanner.MediaFile
 	skipped int
+	blocked int
 	err     error
 }
 
@@ -203,11 +204,11 @@ func (m Model) scanCmd() tea.Cmd {
 		if len(files) == 0 {
 			return scanDoneMsg{err: fmt.Errorf("no files matching %v under %s", cfg.Ext, cfg.Src)}
 		}
-		todo, skipped := worker.Plan(ctx, files, cfg, database)
+		todo, skipped, blocked := worker.Plan(ctx, files, cfg, database)
 		if len(todo) == 0 {
 			return scanDoneMsg{err: fmt.Errorf("nothing to transcode — all outputs already exist (use --force to re-encode)")}
 		}
-		return scanDoneMsg{files: todo, skipped: skipped}
+		return scanDoneMsg{files: todo, skipped: skipped, blocked: blocked}
 	}
 }
 
@@ -257,6 +258,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.initFileItems(msg.files)
 		if msg.skipped > 0 {
 			m.logs = append(m.logs, fmt.Sprintf("skipped %d already up-to-date file(s)", msg.skipped))
+		}
+		if msg.blocked > 0 {
+			m.logs = append(m.logs, fmt.Sprintf("blocked %d Dolby Vision source(s); rerun with --i-know-this-drops-hdr to transcode them anyway", msg.blocked))
 		}
 		return m, nil
 

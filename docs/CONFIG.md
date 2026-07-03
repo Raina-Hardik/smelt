@@ -46,6 +46,8 @@ transcode:
   to: ""                      # string   — target container (mp4|mkv|webm|…); empty keeps source
   output_dir: ""              # string   — redirect output here; empty = alongside source
   suffix: ".smelt"            # string   — output filename suffix (alongside source)
+  decode_threads: 0           # int      — cap decoder thread count; 0 = ffmpeg default
+  allow_hdr_loss: false       # bool     — required to transcode a detected Dolby Vision source
 
 profiles:
   web:
@@ -278,6 +280,15 @@ encoder for the target codec (running a tiny test encode — compiled-in is not
 enough) and falls back to software; `none` forces software. An explicit backend
 that turns out unusable also falls back. The chosen encoder is logged at start.
 
+smelt only ever accelerates *encode* — decode is always software, regardless
+of `hwaccel`. Whenever a hardware backend resolves, smelt logs a resource-profile
+warning: full-CPU decode running concurrently with the GPU/QSV/NVENC encode
+block is the most thermally demanding combination on constrained hardware
+(this also fires on `--dry-run`, before any file is touched). Use
+`decode_threads` to cap the decode side, and see
+[Running politely on constrained hardware](../README.md#running-politely-on-constrained-hardware)
+for OS-level throttling.
+
 ```yaml
 transcode:
   hwaccel: auto
@@ -469,6 +480,50 @@ final name on success and deleted on any failure.)
 ```yaml
 transcode:
   suffix: .smelt
+```
+
+#### `transcode.decode_threads`
+
+| Attribute | Value |
+|---|---|
+| Type | `int` |
+| Default | `0` (ffmpeg default) |
+| CLI flag | `--decode-threads` |
+| Env var | `SMELT_DECODE_THREADS` |
+
+Caps ffmpeg's decoder thread count. Emitted as a global `-threads N` *before*
+`-i`, so it constrains decode specifically — `extra_args`/`--ffmpeg-arg`
+options land after `-i` and only affect the encoder. Useful for large
+software-decoded sources (e.g. 10-bit 4K HEVC) run alongside a hardware
+encoder backend, where decode is otherwise uncapped. See the `hwaccel`
+resource-profile warning below.
+
+```yaml
+transcode:
+  decode_threads: 4
+```
+
+#### `transcode.allow_hdr_loss`
+
+| Attribute | Value |
+|---|---|
+| Type | `bool` |
+| Default | `false` |
+| CLI flag | `--i-know-this-drops-hdr` |
+| Env var | `SMELT_ALLOW_HDR_LOSS` |
+
+Required to transcode a source carrying a Dolby Vision RPU (detected via
+`ffprobe`'s DOVI configuration record). Without it, matching files are
+excluded from the plan and counted separately from `skipped` — smelt has no
+DV passthrough, so a plain re-encode would silently drop the RPU layer. Set
+this only once you've made that call knowingly; it does not affect static
+HDR10/HDR10+ metadata, which is a separate, currently undetected gap (see
+[Planned / Under Consideration](../README.md#planned--under-consideration)
+in the README).
+
+```yaml
+transcode:
+  allow_hdr_loss: true
 ```
 
 ---

@@ -67,11 +67,27 @@ func TestPlanExcludesOwnOutputsAndExisting(t *testing.T) {
 
 	cfg := &config.Config{Suffix: ".smelt"}
 	files := []scanner.MediaFile{{Path: src}, {Path: own}, {Path: fresh}}
-	todo, skipped := Plan(context.Background(), files, cfg, nil)
+	todo, skipped, _ := Plan(context.Background(), files, cfg, nil)
 
 	// a.mkv skipped (a.smelt.mkv exists), b.smelt.mkv skipped (own output), c.mkv kept.
 	if skipped != 2 || len(todo) != 1 || todo[0].Path != fresh {
 		t.Fatalf("Plan = (todo %v, skipped %d), want ([c.mkv], 2)", todo, skipped)
+	}
+}
+
+// AllowHDRLoss must short-circuit the DV probe entirely — no ffprobe call,
+// no blocked count — since a file that fails ffprobe (e.g. this test's
+// plain-text stand-in) would otherwise pass through anyway.
+func TestPlanAllowHDRLossSkipsDVCheck(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.mkv")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Suffix: ".smelt", AllowHDRLoss: true}
+	todo, skipped, blocked := Plan(context.Background(), []scanner.MediaFile{{Path: src}}, cfg, nil)
+	if skipped != 0 || blocked != 0 || len(todo) != 1 {
+		t.Fatalf("Plan = (todo %d, skipped %d, blocked %d), want (1, 0, 0)", len(todo), skipped, blocked)
 	}
 }
 
@@ -81,7 +97,7 @@ func TestPlanForceKeepsExisting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a.smelt.mkv"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	todo, skipped := Plan(context.Background(), []scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true}, nil)
+	todo, skipped, _ := Plan(context.Background(), []scanner.MediaFile{{Path: src}}, &config.Config{Suffix: ".smelt", Force: true}, nil)
 	if skipped != 0 || len(todo) != 1 {
 		t.Errorf("with --force: (todo %d, skipped %d), want (1, 0)", len(todo), skipped)
 	}

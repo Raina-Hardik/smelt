@@ -36,6 +36,8 @@ type Config struct {
 	Suffix           string
 	Profile          string
 	ExtraArgs        []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
+	DecodeThreads    int      // --decode-threads: caps decoder thread count (0 = ffmpeg default)
+	AllowHDRLoss     bool     // --i-know-this-drops-hdr: required to transcode a detected Dolby Vision source
 
 	SubtitleMode string // "copy" (default) | "drop"
 	DBPath       string // path to the SQLite history database; "" disables the DB
@@ -109,7 +111,9 @@ func Load() *Config {
 		Suffix:           suffix,
 		Profile:          viper.GetString("transcode.profile"),
 		// Profile extra_args come first; CLI --ffmpeg-arg refine/append after.
-		ExtraArgs: append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
+		ExtraArgs:     append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
+		DecodeThreads: viper.GetInt("transcode.decode_threads"),
+		AllowHDRLoss:  viper.GetBool("transcode.allow_hdr_loss"),
 
 		SubtitleMode: viper.GetString("transcode.subs"),
 		DBPath:       viper.GetString("smelt.db"),
@@ -161,6 +165,9 @@ func (c *Config) Validate() error {
 	}
 	if c.CRF < 0 || c.CRF > 51 {
 		return fmt.Errorf("--crf %d out of range (0-51)", c.CRF)
+	}
+	if c.DecodeThreads < 0 {
+		return fmt.Errorf("--decode-threads %d must be >= 0", c.DecodeThreads)
 	}
 	if !ffmpeg.IsKnownHWAccel(c.HWAccel) {
 		return fmt.Errorf("unknown --hwaccel %q; valid: auto, none, nvenc, qsv, vaapi, amf, videotoolbox", c.HWAccel)

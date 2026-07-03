@@ -27,16 +27,17 @@ type ProgressEvent struct {
 // keeping this package ignorant of config/viper. Grow this struct rather than
 // the Run signature when adding encode options.
 type EncodeSpec struct {
-	Codec        string   // alias (h264|h265|av1|vp9) or a raw encoder name
-	CRF          int      // constant rate factor
-	Preset       string   // encoder preset; ignored by codecs that don't take one
-	Container    string   // output container (e.g. mp4); drives container-specific muxer flags
-	Encoder      string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
-	Backend      string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
-	AudioCodec   string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
-	AudioBitrate string   // e.g. "192k"; applied only when re-encoding audio
-	SubtitleMode string   // "copy" (default) | "drop"; controls subtitle stream handling
-	ExtraArgs    []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
+	Codec         string   // alias (h264|h265|av1|vp9) or a raw encoder name
+	CRF           int      // constant rate factor
+	Preset        string   // encoder preset; ignored by codecs that don't take one
+	Container     string   // output container (e.g. mp4); drives container-specific muxer flags
+	Encoder       string   // resolved concrete encoder (e.g. hevc_nvenc); empty → software from Codec
+	Backend       string   // hw backend (nvenc|qsv|vaapi|amf|videotoolbox); "" → software
+	AudioCodec    string   // audio codec alias (aac|opus|…) or "copy"/"" to stream-copy
+	AudioBitrate  string   // e.g. "192k"; applied only when re-encoding audio
+	SubtitleMode  string   // "copy" (default) | "drop"; controls subtitle stream handling
+	DecodeThreads int      // 0 = ffmpeg default; caps the decoder's thread count (pre -i, unlike --ffmpeg-arg)
+	ExtraArgs     []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -158,15 +159,22 @@ func videoEncoder(spec EncodeSpec) string {
 	return codecFlag(spec.Codec)
 }
 
-// preInputArgs are flags that must precede -i (e.g. selecting the hardware device).
+// preInputArgs are flags that must precede -i (e.g. selecting the hardware
+// device, capping decoder threads). smelt does not accelerate decode — it is
+// always software, even when Backend selects a hardware encoder — so
+// DecodeThreads is the only lever for capping that side of the pipeline.
 func preInputArgs(spec EncodeSpec) []string {
+	var args []string
+	if spec.DecodeThreads > 0 {
+		args = append(args, "-threads", strconv.Itoa(spec.DecodeThreads))
+	}
 	switch spec.Backend {
 	case "vaapi":
-		return []string{"-vaapi_device", vaapiDevice()}
+		args = append(args, "-vaapi_device", vaapiDevice())
 	case "qsv":
-		return []string{"-init_hw_device", "qsv=qsv:hw_any"}
+		args = append(args, "-init_hw_device", "qsv=qsv:hw_any")
 	}
-	return nil
+	return args
 }
 
 // videoFilterArgs uploads frames to GPU memory where the backend requires it.
@@ -524,6 +532,26 @@ func ProbeHealth(ctx context.Context, path string) (*FileHealth, error) {
 		}
 	}
 	return info, nil
+}
+
+// ProbeDolbyVision reports whether the primary video stream carries a Dolby
+// Vision configuration record (RPU side data). smelt has no DV passthrough —
+// a plain re-encode silently drops the RPU layer — so this gates the
+// --i-know-this-drops-hdr safety check rather than feeding an encode
+// decision. Errors propagate so callers can choose whether to fail closed or
+// open on an unreadable file.
+func ProbeDolbyVision(ctx context.Context, path string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "ffprobe",
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream_side_data=side_data_type",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	).Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(string(out), "DOVI configuration record"), nil
 }
 
 func ProbeVideoCodec(ctx context.Context, path string) (string, error) {

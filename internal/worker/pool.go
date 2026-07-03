@@ -62,6 +62,25 @@ func (p *Pool) Resolve(ctx context.Context) (encoder, backend string) {
 	return p.encoder, p.backend
 }
 
+// LogResourceProfile logs the decode/encode split for a resolved encoder
+// choice. smelt only ever accelerates the encode side — decode is always
+// software, regardless of backend — so a non-empty backend means full CPU
+// decode runs concurrently with the GPU/QSV/NVENC encode block, the most
+// thermally demanding combination. Nothing here caps that combined load; the
+// warning exists so it's visible before ffmpeg starts, not discovered via a
+// thermal shutdown. Call once per run, including on the --dry-run path.
+func LogResourceProfile(encoder, backend string) {
+	if backend == "" {
+		log.Info().Str("decode", "software").Str("encode", "software").Msg("resource profile")
+		return
+	}
+	log.Warn().
+		Str("decode", "software").
+		Str("encode", backend).
+		Str("encoder", encoder).
+		Msg("resource profile: software decode + hardware encode running concurrently; combined CPU+GPU load is not capped by smelt — see --decode-threads and --workers, or run under nice/ionice/systemd-run --scope -p CPUQuota= on thermally constrained hardware")
+}
+
 // Run transcodes all files, logging results via zerolog. Blocks until done.
 // It is a thin wrapper over RunWithCallbacks so both entry points share one
 // dispatch loop; the callbacks here just translate events into log lines.
@@ -74,6 +93,7 @@ func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 		Str("encoder", enc).
 		Str("backend", backend).
 		Msg("encoder selected")
+	LogResourceProfile(enc, backend)
 
 	var failed atomic.Int64
 
@@ -206,16 +226,17 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	}()
 
 	spec := ffmpeg.EncodeSpec{
-		Codec:        p.cfg.Codec,
-		CRF:          p.cfg.CRF,
-		Preset:       p.cfg.Preset,
-		AudioCodec:   p.cfg.AudioCodec,
-		AudioBitrate: p.cfg.AudioBitrate,
-		SubtitleMode: p.cfg.SubtitleMode,
-		ExtraArgs:    p.cfg.ExtraArgs,
-		Container:    strings.TrimPrefix(filepath.Ext(dst), "."),
-		Encoder:      p.encoder,
-		Backend:      p.backend,
+		Codec:         p.cfg.Codec,
+		CRF:           p.cfg.CRF,
+		Preset:        p.cfg.Preset,
+		AudioCodec:    p.cfg.AudioCodec,
+		AudioBitrate:  p.cfg.AudioBitrate,
+		SubtitleMode:  p.cfg.SubtitleMode,
+		DecodeThreads: p.cfg.DecodeThreads,
+		ExtraArgs:     p.cfg.ExtraArgs,
+		Container:     strings.TrimPrefix(filepath.Ext(dst), "."),
+		Encoder:       p.encoder,
+		Backend:       p.backend,
 	}
 
 	start := time.Now()
@@ -279,32 +300,52 @@ func (p *Pool) record(f scanner.MediaFile, dst string, spec ffmpeg.EncodeSpec, e
 // (`*<suffix><ext>`) and (b) sources whose output already exists. In-place runs
 // probe each file's video codec and drop those already in the target codec.
 // cfg.Force disables all skipping. database may be nil (disables DB-based skip).
-func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config, database *db.DB) (todo []scanner.MediaFile, skipped int) {
+//
+// Unless cfg.AllowHDRLoss, every remaining candidate is also probed for a
+// Dolby Vision RPU; smelt has no DV passthrough, so a plain re-encode would
+// silently drop it. Matches are excluded and counted in blocked rather than
+// silently degraded — the caller should surface that count so the user can
+// re-run with --i-know-this-drops-hdr once they've made that call knowingly.
+func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config, database *db.DB) (todo []scanner.MediaFile, skipped, blocked int) {
 	if cfg.InPlace {
-		return planInplace(files, cfg, database, func(p string) (string, error) {
+		todo, skipped = planInplace(files, cfg, database, func(p string) (string, error) {
 			return ffmpeg.ProbeVideoCodec(ctx, p)
 		})
+	} else {
+		for _, f := range files {
+			if isOwnOutput(f.Path, cfg.Suffix) {
+				skipped++
+				continue
+			}
+			if !cfg.Force {
+				if _, err := os.Stat(OutputPath(f, cfg)); err == nil {
+					skipped++
+					continue
+				}
+			}
+			if len(cfg.SkipSourceCodecs) > 0 {
+				if cur, err := ffmpeg.ProbeVideoCodec(ctx, f.Path); err == nil && isSkippedSource(cur, cfg.SkipSourceCodecs) {
+					skipped++
+					continue
+				}
+			}
+			todo = append(todo, f)
+		}
 	}
-	for _, f := range files {
-		if isOwnOutput(f.Path, cfg.Suffix) {
-			skipped++
+
+	if cfg.AllowHDRLoss {
+		return todo, skipped, 0
+	}
+	kept := todo[:0]
+	for _, f := range todo {
+		if isDV, err := ffmpeg.ProbeDolbyVision(ctx, f.Path); err == nil && isDV {
+			blocked++
+			log.Warn().Str("file", f.Path).Msg("blocked: Dolby Vision source; re-encode would silently drop the RPU layer — pass --i-know-this-drops-hdr to proceed anyway")
 			continue
 		}
-		if !cfg.Force {
-			if _, err := os.Stat(OutputPath(f, cfg)); err == nil {
-				skipped++
-				continue
-			}
-		}
-		if len(cfg.SkipSourceCodecs) > 0 {
-			if cur, err := ffmpeg.ProbeVideoCodec(ctx, f.Path); err == nil && isSkippedSource(cur, cfg.SkipSourceCodecs) {
-				skipped++
-				continue
-			}
-		}
-		todo = append(todo, f)
+		kept = append(kept, f)
 	}
-	return todo, skipped
+	return kept, skipped, blocked
 }
 
 // planInplace keeps only files that aren't already in the target codec. The

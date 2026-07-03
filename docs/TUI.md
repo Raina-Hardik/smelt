@@ -195,6 +195,13 @@ Press `Q` to skip that drain and exit immediately. ffmpeg is still killed, but
 because smelt does not wait, a partial `.transcoded` file from an in-flight job
 may remain on disk.
 
+This all assumes `smelt` itself receives the keypress/signal. If `smelt` is
+instead killed externally with `SIGKILL` (e.g. `kill -9`, or a process-group
+`pkill -9` that catches the parent too) the Go cleanup above never runs at
+all — `SIGKILL` isn't catchable — and a `.transcoded` partial can be left
+behind regardless of which job was in flight. `smelt clean` finds and removes
+these. Prefer `q`/`Ctrl+C` or `SIGTERM` when you have the choice.
+
 ---
 
 ## Terminal Requirements

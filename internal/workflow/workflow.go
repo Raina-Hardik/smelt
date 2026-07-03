@@ -109,6 +109,12 @@ func TranscodeArgs(cfg *config.Config) []string {
 	for _, e := range cfg.ExtraArgs {
 		args = append(args, flag("--ffmpeg-arg", e))
 	}
+	if cfg.DecodeThreads > 0 {
+		args = append(args, flag("--decode-threads", strconv.Itoa(cfg.DecodeThreads)))
+	}
+	if cfg.AllowHDRLoss {
+		args = append(args, "--i-know-this-drops-hdr")
+	}
 	// Non-interactive: a scheduled run must never block on a confirmation prompt.
 	if cfg.InPlace {
 		args = append(args, "--assume-yes")

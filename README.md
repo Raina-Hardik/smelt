@@ -125,6 +125,49 @@ See [docs/CONFIG.md](docs/CONFIG.md) for the full schema and key reference.
 
 ---
 
+## Running politely on constrained hardware
+
+`--workers` bounds how many *files* run concurrently — it does nothing for a
+single large file, where one ffmpeg process is free to use every core and
+thread it can get. That matters most for a big software-decoded source (e.g.
+10-bit 4K HEVC) on thin-and-light or otherwise thermally limited hardware.
+
+smelt only ever accelerates the *encode* side. Decode is always software, on
+every `--hwaccel` backend, so a resolved hardware encoder means full-CPU
+decode running concurrently with the GPU/QSV/NVENC encode block — the most
+demanding combination thermally. smelt logs a `resource profile` warning
+whenever this combination resolves (including on `--dry-run`, before any file
+is touched), and `--decode-threads N` caps the decoder's own thread count
+(unlike `--ffmpeg-arg -threads N`, which lands after `-i` and only constrains
+the encoder).
+
+Beyond that, smelt has no CPU/thermal governor of its own — throttle at the OS
+level:
+
+```bash
+# Cap CPU quota and I/O priority for one run via systemd (cgroup-enforced,
+# unlike CPU affinity + nice/ionice chained through a shell, which can silently
+# fail to inherit across exec boundaries — verify with `taskset -p $$` inside
+# the actual ffmpeg process if you go that route)
+systemd-run --scope -p CPUQuota=50% --nice=10 \
+  smelt transcode --src /mnt/media --decode-threads 2 --workers 1
+
+# Lower scheduling/IO priority only (no hard cap)
+nice -n 10 ionice -c2 -n7 smelt transcode --src /mnt/media --decode-threads 2
+```
+
+If a run needs to be stopped, prefer `Ctrl-C`/`q` (in the TUI) or `SIGTERM`
+over externally `SIGKILL`-ing the `smelt` process itself. smelt's own
+cancellation path kills the in-flight ffmpeg child and then cleans up the
+in-progress `.transcoded` partial in Go — but `SIGKILL` is not catchable, so
+sending it straight to `smelt` (e.g. `pkill -9` on a whole process-group chain)
+can end the Go process before that cleanup runs, leaving a stray partial file
+behind (`smelt clean` finds and removes these). A hung ffmpeg child can also
+occasionally outlive a first `SIGKILL` attempt (e.g. stuck in
+`futex_do_wait`) and need a second, direct one.
+
+---
+
 ## Planned / Under Consideration
 
 The core tool targets straightforward container/codec transcoding. Complex

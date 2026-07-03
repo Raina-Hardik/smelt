@@ -69,9 +69,12 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	// smart-skip target matches what will actually be encoded.
 	cfg.Codec = ffmpeg.ResolveCodec(cmd.Context(), cfg.Codec, cfg.HWAccel)
 
-	files, skipped := worker.Plan(cmd.Context(), files, cfg, database)
+	files, skipped, blocked := worker.Plan(cmd.Context(), files, cfg, database)
 	if skipped > 0 {
 		log.Info().Int("skipped", skipped).Msg("skipped up-to-date files (use --force to re-transcode)")
+	}
+	if blocked > 0 {
+		log.Warn().Int("blocked", blocked).Msg("blocked Dolby Vision source(s); re-run with --i-know-this-drops-hdr to transcode them anyway")
 	}
 	if len(files) == 0 {
 		log.Info().Msg("nothing to transcode; all outputs already exist")
@@ -86,6 +89,8 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	}
 
 	if cfg.DryRun {
+		enc, backend := ffmpeg.ResolveEncoder(cmd.Context(), cfg.Codec, cfg.HWAccel)
+		worker.LogResourceProfile(enc, backend)
 		for _, f := range files {
 			log.Info().
 				Str("src", f.Path).
@@ -222,6 +227,14 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"subs", "copy",
 		"subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles)",
 	)
+	cmd.Flags().Int(
+		"decode-threads", 0,
+		"cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder",
+	)
+	cmd.Flags().Bool(
+		"i-know-this-drops-hdr", false,
+		"required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss",
+	)
 }
 
 // bindTranscodeFlags binds the invoked command's flags to viper at run time.
@@ -249,6 +262,8 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.profile", "profile"},
 		{"transcode.ffmpeg_args", "ffmpeg-arg"},
 		{"transcode.subs", "subs"},
+		{"transcode.decode_threads", "decode-threads"},
+		{"transcode.allow_hdr_loss", "i-know-this-drops-hdr"},
 		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent
 	}
 	for _, b := range binds {
