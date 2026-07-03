@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 	"github.com/Raina-Hardik/smelt/internal/worker"
 	tea "github.com/charmbracelet/bubbletea"
@@ -341,6 +342,104 @@ func TestAdjustCRFClamps(t *testing.T) {
 	}
 }
 
+func TestAdjustDecodeThreadsClamps(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fDecodeThreads
+	m.cfg.DecodeThreads = 0
+	if out, _ := m.adjust(-1); out.(Model).cfg.DecodeThreads != 0 {
+		t.Errorf("decode-threads clamped low = %d, want 0", out.(Model).cfg.DecodeThreads)
+	}
+	out, _ := m.adjust(+1)
+	if got := out.(Model).cfg.DecodeThreads; got != 1 {
+		t.Errorf("decode-threads after +1 = %d, want 1", got)
+	}
+}
+
+func TestAdjustAudioCodecCycles(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fAudioCodec
+	m.cfg.AudioCodec = "copy"
+	out, _ := m.adjust(+1)
+	got := out.(Model).cfg.AudioCodec
+	if got == "copy" || !ffmpeg.IsKnownAudioCodec(got) {
+		t.Errorf("audio-codec after +1 = %q, want a different known codec", got)
+	}
+}
+
+// Changing audio-bitrate while audio-codec is copy would queue a value
+// ffmpeg.audioArgs never applies (copy short-circuits before -b:a), so the
+// field must no-op instead of silently building a dead setting.
+func TestAdjustAudioBitrateNoopWhenCopy(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fAudioBitrate
+	m.cfg.AudioCodec = "copy"
+	m.cfg.AudioBitrate = ""
+	out, _ := m.adjust(+1)
+	if got := out.(Model).cfg.AudioBitrate; got != "" {
+		t.Errorf("audio-bitrate with audio-codec=copy after +1 = %q, want unchanged \"\"", got)
+	}
+}
+
+func TestAdjustAudioBitrateCyclesWhenReencoding(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fAudioBitrate
+	m.cfg.AudioCodec = "aac"
+	m.cfg.AudioBitrate = ""
+	out, _ := m.adjust(+1)
+	if got := out.(Model).cfg.AudioBitrate; got == "" {
+		t.Error("audio-bitrate with audio-codec=aac after +1 should advance past the empty default")
+	}
+}
+
+func TestAdjustSubsCycles(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fSubs
+	m.cfg.SubtitleMode = "copy"
+	out, _ := m.adjust(+1)
+	if got := out.(Model).cfg.SubtitleMode; got != "drop" {
+		t.Errorf("subs after +1 = %q, want drop", got)
+	}
+}
+
+func TestAdjustInPlaceToggles(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fInPlace
+	m.cfg.InPlace = false
+	out, _ := m.adjust(+1)
+	if !out.(Model).cfg.InPlace {
+		t.Error("inplace after toggle = false, want true")
+	}
+	out2, _ := out.(Model).adjust(+1)
+	if out2.(Model).cfg.InPlace {
+		t.Error("inplace after second toggle = true, want false")
+	}
+}
+
+// --inplace is mutually exclusive with --output-dir/--to (config.Validate);
+// since those are launch-only in this UI, turning --inplace on must be
+// blocked rather than silently clearing a value the user passed on the CLI.
+func TestAdjustInPlaceBlockedByOutputDir(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fInPlace
+	m.cfg.InPlace = false
+	m.cfg.OutputDir = "/mnt/out"
+	out, _ := m.adjust(+1)
+	if out.(Model).cfg.InPlace {
+		t.Error("inplace should not turn on while --output-dir is set")
+	}
+}
+
+func TestAdjustInPlaceBlockedByContainer(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fInPlace
+	m.cfg.InPlace = false
+	m.cfg.Container = "mp4"
+	out, _ := m.adjust(+1)
+	if out.(Model).cfg.InPlace {
+		t.Error("inplace should not turn on while --to is set")
+	}
+}
+
 func TestPreflightFieldNavWraps(t *testing.T) {
 	m := newTestModel(t, "/x/a.mkv")
 	out, _ := m.handleKey(keyMsg("up")) // from fCodec(0) up wraps to last
@@ -367,4 +466,20 @@ func TestHelpToggle(t *testing.T) {
 	if out.(Model).showHelp {
 		t.Error("esc should close help")
 	}
+}
+
+// View() has no unit coverage otherwise; this guards against a nil-pointer
+// panic in preflightView/confirmInplaceView as fields get added over time.
+func TestPreflightAndConfirmViewsRenderWithoutPanic(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv", "/x/b.mkv")
+	m.width, m.height = 100, 40
+	m.resolved = true
+	m.encoder, m.backend = "hevc_nvenc", "nvenc"
+	m.cfg.AudioCodec = "aac"
+	m.cfg.AudioBitrate = "192k"
+	_ = m.View()
+	m.cfg.InPlace = true
+	_ = m.View()
+	m.confirming = true
+	_ = m.View()
 }

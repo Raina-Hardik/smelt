@@ -51,12 +51,20 @@ const (
 	fPreset
 	fHWAccel
 	fWorkers
+	fDecodeThreads
+	fAudioCodec
+	fAudioBitrate
+	fSubs
+	fInPlace
 	confFieldCount
 )
 
 var (
-	codecChoices   = []string{"h264", "h265", "av1", "vp9"}
-	hwaccelChoices = []string{"auto", "none", "nvenc", "qsv", "vaapi", "amf", "videotoolbox"}
+	codecChoices        = []string{"h264", "h265", "av1", "vp9"}
+	hwaccelChoices      = []string{"auto", "none", "nvenc", "qsv", "vaapi", "amf", "videotoolbox"}
+	audioCodecChoices   = ffmpeg.KnownAudioCodecs()
+	audioBitrateChoices = []string{"", "96k", "128k", "192k", "256k", "320k"}
+	subsChoices         = []string{"copy", "drop"}
 )
 
 // ── file item ────────────────────────────────────────────────────────────────
@@ -416,6 +424,29 @@ func (m Model) adjust(delta int) (tea.Model, tea.Cmd) {
 		reResolve = true
 	case fWorkers:
 		m.cfg.Workers = clamp(m.cfg.Workers+delta, 1, 256)
+	case fDecodeThreads:
+		m.cfg.DecodeThreads = clamp(m.cfg.DecodeThreads+delta, 0, 256)
+	case fAudioCodec:
+		m.cfg.AudioCodec = cycle(audioCodecChoices, m.cfg.AudioCodec, delta)
+	case fAudioBitrate:
+		// Ignored by ffmpeg.audioArgs when AudioCodec is copy; no-op here too so
+		// the field visibly does nothing rather than silently queuing a value
+		// that will never reach the ffmpeg invocation.
+		if !strings.EqualFold(m.cfg.AudioCodec, "copy") && m.cfg.AudioCodec != "" {
+			m.cfg.AudioBitrate = cycle(audioBitrateChoices, m.cfg.AudioBitrate, delta)
+		}
+	case fSubs:
+		m.cfg.SubtitleMode = cycle(subsChoices, m.cfg.SubtitleMode, delta)
+	case fInPlace:
+		// --inplace is mutually exclusive with --output-dir/--to (config.Validate
+		// enforces this at launch); those two are launch-only in this UI, so
+		// rather than silently clearing a value the user passed on the CLI,
+		// block turning --inplace on while either is set.
+		want := !m.cfg.InPlace
+		if want && (m.cfg.OutputDir != "" || m.cfg.Container != "") {
+			return m, nil
+		}
+		m.cfg.InPlace = want
 	}
 	if reResolve {
 		m.resolved, m.encoder, m.backend = false, "", ""
@@ -701,6 +732,26 @@ func (m Model) preflightView() string {
 		preset = "—"
 	}
 
+	decodeThreads := "uncapped"
+	if m.cfg.DecodeThreads > 0 {
+		decodeThreads = strconv.Itoa(m.cfg.DecodeThreads)
+	}
+
+	audioBitrate := m.cfg.AudioBitrate
+	switch {
+	case strings.EqualFold(m.cfg.AudioCodec, "copy") || m.cfg.AudioCodec == "":
+		audioBitrate = "n/a"
+	case audioBitrate == "":
+		audioBitrate = "—"
+	}
+
+	inplace := "off"
+	inplaceSuffix := ""
+	if m.cfg.InPlace {
+		inplace = "on"
+		inplaceSuffix = "  ⚠ replaces originals"
+	}
+
 	var b strings.Builder
 	b.WriteString(theme.Title.Render("⚡ smelt — configure"))
 	b.WriteString("\n\n")
@@ -711,9 +762,14 @@ func (m Model) preflightView() string {
 	b.WriteString(edit(fPreset, "preset", preset, "") + "\n")
 	b.WriteString(edit(fHWAccel, "hwaccel", m.cfg.HWAccel, "  → "+m.resolvedEncoder()) + "\n")
 	b.WriteString(edit(fWorkers, "workers", strconv.Itoa(m.cfg.Workers), "") + "\n")
+	b.WriteString(edit(fDecodeThreads, "decode", decodeThreads, "") + "\n")
 	if line := m.resourceProfileLine(); line != "" {
 		b.WriteString(line + "\n")
 	}
+	b.WriteString(edit(fAudioCodec, "audio", m.cfg.AudioCodec, "") + "\n")
+	b.WriteString(edit(fAudioBitrate, "bitrate", audioBitrate, "") + "\n")
+	b.WriteString(edit(fSubs, "subs", m.cfg.SubtitleMode, "") + "\n")
+	b.WriteString(edit(fInPlace, "inplace", inplace, inplaceSuffix) + "\n")
 	b.WriteString("\n")
 	b.WriteString(theme.Help.Render("  [↑↓/tab] field   [←→] change   [enter] start   [q] abort   [?] help"))
 	// Center the card so it scales with the terminal instead of hugging the corner.

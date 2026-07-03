@@ -27,8 +27,13 @@ run.
 │   preset    ‹ medium ›                                 │
 │   hwaccel   ‹ auto › → hevc_nvenc                      │
 │   workers   ‹ 16 ›                                     │
+│   decode    ‹ uncapped ›                               │
 │   decode: software (uncapped)  ⚠ concurrent with       │
 │           hardware encode — see --decode-threads       │
+│   audio     ‹ copy ›                                    │
+│   bitrate   ‹ n/a ›                                     │
+│   subs      ‹ copy ›                                    │
+│   inplace   ‹ off ›                                     │
 │                                                        │
 │   [↑↓/tab] field  [←→] change  [enter] start  [q] abort│
 └──────────────────────────────────────────────────────┘
@@ -38,22 +43,38 @@ run.
 |---|---|
 | `↑`/`↓`, `k`/`j`, `tab`/`shift+tab` | Move between fields (`▸` marks the focused one) |
 | `←`/`→`, `h`/`l` | Change the focused field's value |
-| `enter` / `s` | Start transcoding with the shown settings (or, with `--inplace`, show the confirm screen below) |
+| `enter` / `s` | Start transcoding with the shown settings (or, with `inplace` on, show the confirm screen below) |
 | `q` / `Ctrl+C` | Abort without touching any files |
 
-Editable fields: **codec** (`h264`/`h265`/`av1`/`vp9`), **crf** (0–51),
-**preset**, **hwaccel** (`auto`/`none`/backend), **workers**. Changing codec or
-hwaccel re-probes; the `hwaccel` row reads `resolving…` until the probe returns.
+Editable fields, top to bottom:
 
-The **resource-profile** row mirrors the same warning `smelt transcode` logs
-via zerolog when a hardware encoder resolves — the TUI doesn't render log
-lines, so without this row that warning would be invisible here. smelt only
-ever accelerates encode; decode is always software, so a resolved hardware
-backend means uncapped software decode runs concurrently with the GPU/QSV/NVENC
-encode block, the most thermally demanding combination. It reads
-`software (capped at N threads)` when `--decode-threads` is set, `software
-(uncapped)` otherwise, with the ⚠ warning appended only when a hardware
-backend actually resolved.
+| Field | Values | CLI flag |
+|---|---|---|
+| **codec** | `h264` / `h265` / `av1` / `vp9` | `--codec` |
+| **crf** | `0`–`51` | `--crf` |
+| **preset** | filtered to the resolved encoder — see table below | `--preset` |
+| **hwaccel** | `auto` / `none` / backend | `--hwaccel` |
+| **workers** | `1`–`256` | `--workers` |
+| **decode** | `uncapped` or a thread count | `--decode-threads` |
+| **audio** | `copy` / `aac` / `opus` / `mp3` / `ac3` / `flac` | `--audio-codec` |
+| **bitrate** | `n/a` while `audio` is `copy`; otherwise `—` (encoder default) or a preset (`96k`…`320k`) | `--audio-bitrate` |
+| **subs** | `copy` / `drop` | `--subs` |
+| **inplace** | `off` / `on` (⚠ replaces originals) | `--inplace` |
+
+Changing codec or hwaccel re-probes; the `hwaccel` row reads `resolving…`
+until the probe returns. The `bitrate` field is a no-op while `audio` is
+`copy` — matching the CLI, where `--audio-bitrate` is ignored in that case —
+so it never queues a value that would never reach the ffmpeg invocation.
+
+The **resource-profile** row (directly under `decode`) mirrors the same
+warning `smelt transcode` logs via zerolog when a hardware encoder resolves —
+the TUI doesn't render log lines, so without this row that warning would be
+invisible here. smelt only ever accelerates encode; decode is always
+software, so a resolved hardware backend means uncapped software decode runs
+concurrently with the GPU/QSV/NVENC encode block, the most thermally
+demanding combination. It reads `software (capped at N threads)` when
+`decode` is set above zero, `software (uncapped)` otherwise, with the ⚠
+warning appended only when a hardware backend actually resolved.
 
 The **preset** list is filtered to the encoder that was actually resolved, so
 you can only pick a value that encoder accepts:
@@ -69,6 +90,43 @@ you can only pick a value that encoder accepts:
 If a re-probe lands on an encoder for which the current preset isn't valid, it
 snaps to that encoder's default. Each field maps 1:1 to its CLI flag — the
 screen adds no behavior the flags can't express.
+
+### What's launch-only, and why
+
+Every `smelt transcode` flag works when passed to `smelt tui` — it just seeds
+the pre-flight screen's starting values. Not every flag is *also* live-editable
+on that screen, for two distinct reasons:
+
+- **Determines which files are even in the queue.** `--ext`, `--force`,
+  `--skip-hardlinked`, `--skip-source-codec`, `--profile`, `--ffmpeg-arg`, and
+  `--i-know-this-drops-hdr` all act during the background scan/plan, before
+  the pre-flight screen ever appears (`worker.Plan`, run once in `Init`).
+  Changing them afterward would be a dead control: the file list
+  (`m.files`) is fixed at that point, so toggling e.g.
+  `--i-know-this-drops-hdr` on the configure screen could not retroactively
+  un-block a Dolby Vision source already excluded from the queue. These stay
+  launch-only on principle, not just for lack of time — exposing them would
+  be misleading. Restart the TUI to rescan under new settings.
+- **No text-input widget yet.** `--output-dir`, `--suffix`, and `--to`
+  (container) only affect *how* an already-queued file is written, so they
+  don't have the correctness problem above — but their values are
+  free-form strings, and the pre-flight screen's editing model is a closed
+  left/right cycle over a small choice set, not text entry. Wiring in a
+  `bubbles/textinput`-style field is future work, not a correctness concern.
+
+`codec` and `inplace` are live-editable despite *also* influencing the
+original `worker.Plan` (in `--inplace` mode, codec drives the smart-skip
+check; toggling `inplace` mid-session doesn't re-run that check either). This
+is an accepted, pre-existing tradeoff for `codec` specifically — changing it
+can leave the queue slightly stale relative to a fresh scan under the new
+value (e.g. a file already in the newly-selected codec stays queued rather
+than being dropped) — and `inplace` now shares that same tradeoff
+deliberately, for consistency. Nothing is destroyed or corrupted either way:
+`OutputPath`/`EncodeSpec` are computed fresh per file at transcode time from
+whatever the fields read the moment the run starts, so worst case is
+re-encoding a file that smart-skip would otherwise have spared. Restart the
+TUI (or just don't change `codec`/`inplace` after reviewing the queue) if you
+need the queue itself to reflect the new setting.
 
 ### `--inplace` confirmation
 

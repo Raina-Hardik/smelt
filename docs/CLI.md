@@ -191,9 +191,12 @@ Global Flags:
 Launch the interactive bubbletea TUI. Opens instantly with a brief "Scanning…"
 state while the source directory is walked and the transcode plan is built in the
 background. Once the scan completes, the editable pre-flight screen appears where
-you can adjust codec, CRF, preset, hwaccel, and workers. The concrete encoder
-resolved from `--hwaccel` is shown live. Press Enter to begin; jobs run in
-parallel with live progress, worker status, and logs.
+you can adjust codec, CRF, preset, hwaccel, workers, decode-thread cap, audio
+codec/bitrate, subtitle mode, and inplace. The concrete encoder resolved from
+`--hwaccel` is shown live, alongside a resource-profile warning when decode
+(always software) and encode (a resolved hardware backend) would run
+concurrently. Press Enter to begin (or, with inplace on, confirm first); jobs
+run in parallel with live progress, worker status, and logs.
 
 See [TUI.md](TUI.md) for the full layout and keybindings reference.
 
@@ -209,8 +212,10 @@ smelt tui [flags]
 Launch the interactive transcoding TUI. Opens instantly; scans the source
 directory and builds the transcode plan in the background while showing a
 "Scanning…" state. Once ready, an editable configure screen appears — adjust
-codec, CRF, preset, hwaccel, and workers, and see the concrete encoder that
---hwaccel resolves to. Press enter to start; jobs then run in parallel with
+codec, CRF, preset, hwaccel, workers, decode-thread cap, audio codec/bitrate,
+subtitle mode, and inplace, and see the concrete encoder that --hwaccel
+resolves to plus a live decode/encode resource-profile warning. Press enter
+to start (or, with inplace on, confirm first); jobs then run in parallel with
 live progress, worker status, and logs. Press q or Ctrl+C to cancel running
 jobs cleanly and quit.
 
