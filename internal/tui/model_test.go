@@ -204,6 +204,64 @@ func TestPreflightEnterStartsPool(t *testing.T) {
 	}
 }
 
+// --inplace without --assume-yes must gate enter behind a confirm screen
+// rather than starting immediately (mirrors the CLI's y/N prompt).
+func TestPreflightInplaceEnterShowsConfirm(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.cfg.InPlace = true
+	out, cmd := m.handleKey(keyMsg("enter"))
+	m = out.(Model)
+	if m.started || !m.confirming {
+		t.Errorf("--inplace enter: started=%v confirming=%v, want false/true", m.started, m.confirming)
+	}
+	if cmd != nil {
+		t.Error("showing the confirm screen should not subscribe to the event channel yet")
+	}
+}
+
+func TestConfirmInplaceYStartsPool(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.cfg.InPlace = true
+	out, _ := m.handleKey(keyMsg("enter"))
+	m = out.(Model)
+	out, cmd := m.handleKey(keyMsg("y"))
+	m = out.(Model)
+	if m.confirming || !m.started {
+		t.Errorf("y at confirm: confirming=%v started=%v, want false/true", m.confirming, m.started)
+	}
+	if cmd == nil {
+		t.Error("starting should subscribe to the event channel")
+	}
+}
+
+func TestConfirmInplaceOtherKeyCancels(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.cfg.InPlace = true
+	out, _ := m.handleKey(keyMsg("enter"))
+	m = out.(Model)
+	out, _ = m.handleKey(keyMsg("n"))
+	m = out.(Model)
+	if m.confirming || m.started {
+		t.Errorf("n at confirm: confirming=%v started=%v, want false/false", m.confirming, m.started)
+	}
+}
+
+// --assume-yes must skip the confirm screen entirely, same as it skips the
+// CLI's prompt.
+func TestPreflightInplaceAssumeYesSkipsConfirm(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.cfg.InPlace = true
+	m.cfg.AssumeYes = true
+	out, cmd := m.handleKey(keyMsg("enter"))
+	m = out.(Model)
+	if m.confirming || !m.started {
+		t.Errorf("--assume-yes enter: confirming=%v started=%v, want false/true", m.confirming, m.started)
+	}
+	if cmd == nil {
+		t.Error("starting should subscribe to the event channel")
+	}
+}
+
 func TestResolvedMsgPopulatesEncoder(t *testing.T) {
 	m := newTestModel(t, "/x/a.mkv") // cfg: codec h264, hwaccel auto
 	out, _ := m.Update(resolvedMsg{encoder: "h264_nvenc", backend: "nvenc", codec: "h264", hwaccel: "auto"})

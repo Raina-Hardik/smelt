@@ -13,6 +13,32 @@ import (
 
 func p(s string) string { return filepath.FromSlash(s) }
 
+func TestResourceProfileWarnsOnlyForHardwareBackend(t *testing.T) {
+	if got := BuildResourceProfile("libx265", "", 0); got.Warn {
+		t.Error("software backend should not warn")
+	}
+	if got := BuildResourceProfile("hevc_nvenc", "nvenc", 0); !got.Warn {
+		t.Error("hardware backend should warn (software decode + hardware encode)")
+	}
+}
+
+func TestResourceProfileDecodeLabel(t *testing.T) {
+	cases := []struct {
+		threads int
+		want    string
+	}{
+		{0, "software (uncapped)"},
+		{1, "software (capped at 1 thread)"},
+		{4, "software (capped at 4 threads)"},
+	}
+	for _, c := range cases {
+		got := BuildResourceProfile("libx265", "", c.threads).DecodeLabel()
+		if got != c.want {
+			t.Errorf("DecodeLabel(%d) = %q, want %q", c.threads, got, c.want)
+		}
+	}
+}
+
 func TestOutputPath(t *testing.T) {
 	cases := []struct {
 		name string

@@ -62,20 +62,50 @@ func (p *Pool) Resolve(ctx context.Context) (encoder, backend string) {
 	return p.encoder, p.backend
 }
 
+// ResourceProfile describes the decode/encode split for a resolved encoder
+// choice, independent of how it's displayed (CLI log line, TUI row). smelt
+// only ever accelerates the encode side — decode is always software,
+// regardless of backend — so Warn is true whenever software decode would run
+// concurrently with a hardware encode block, the most thermally demanding
+// combination. Shared by the CLI (LogResourceProfile) and the TUI's
+// pre-flight screen so both surfaces agree on what "capped" means.
+type ResourceProfile struct {
+	Encoder       string
+	Backend       string // "" = software encode
+	DecodeThreads int    // 0 = uncapped (ffmpeg default)
+	Warn          bool
+}
+
+// BuildResourceProfile resolves the profile for a given encoder/backend/cap.
+func BuildResourceProfile(encoder, backend string, decodeThreads int) ResourceProfile {
+	return ResourceProfile{Encoder: encoder, Backend: backend, DecodeThreads: decodeThreads, Warn: backend != ""}
+}
+
+// DecodeLabel is a short human-readable summary of the decode-side cap, e.g.
+// "software (capped at 4 threads)" or "software (uncapped)".
+func (r ResourceProfile) DecodeLabel() string {
+	if r.DecodeThreads > 0 {
+		s := "thread"
+		if r.DecodeThreads != 1 {
+			s = "threads"
+		}
+		return fmt.Sprintf("software (capped at %d %s)", r.DecodeThreads, s)
+	}
+	return "software (uncapped)"
+}
+
 // LogResourceProfile logs the decode/encode split for a resolved encoder
-// choice. smelt only ever accelerates the encode side — decode is always
-// software, regardless of backend — so a non-empty backend means full CPU
-// decode runs concurrently with the GPU/QSV/NVENC encode block, the most
-// thermally demanding combination. Nothing here caps that combined load; the
-// warning exists so it's visible before ffmpeg starts, not discovered via a
-// thermal shutdown. Call once per run, including on the --dry-run path.
-func LogResourceProfile(encoder, backend string) {
-	if backend == "" {
-		log.Info().Str("decode", "software").Str("encode", "software").Msg("resource profile")
+// choice. Nothing here caps the combined load when Warn is true; the warning
+// exists so it's visible before ffmpeg starts, not discovered via a thermal
+// shutdown. Call once per run, including on the --dry-run path.
+func LogResourceProfile(encoder, backend string, decodeThreads int) {
+	r := BuildResourceProfile(encoder, backend, decodeThreads)
+	if !r.Warn {
+		log.Info().Str("decode", r.DecodeLabel()).Str("encode", "software").Msg("resource profile")
 		return
 	}
 	log.Warn().
-		Str("decode", "software").
+		Str("decode", r.DecodeLabel()).
 		Str("encode", backend).
 		Str("encoder", encoder).
 		Msg("resource profile: software decode + hardware encode running concurrently; combined CPU+GPU load is not capped by smelt — see --decode-threads and --workers, or run under nice/ionice/systemd-run --scope -p CPUQuota= on thermally constrained hardware")
@@ -93,7 +123,7 @@ func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 		Str("encoder", enc).
 		Str("backend", backend).
 		Msg("encoder selected")
-	LogResourceProfile(enc, backend)
+	LogResourceProfile(enc, backend, p.cfg.DecodeThreads)
 
 	var failed atomic.Int64
 

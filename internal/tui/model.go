@@ -141,6 +141,7 @@ type Model struct {
 	finished   bool // the worker pool drained on its own (allDoneMsg seen)
 	paused     bool // dispatch paused via p (in-flight jobs keep running)
 	showHelp   bool
+	confirming bool // --inplace + !AssumeYes: pre-flight enter shows a confirm prompt instead of starting
 }
 
 // New creates a TUI model that opens immediately in a "Scanning…" state.
@@ -330,6 +331,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc":
 		m.showHelp = false
+		m.confirming = false
 		return m, nil
 	}
 	if m.showHelp {
@@ -354,8 +356,28 @@ func (m Model) handlePreflightKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.scanning || m.scanErr != nil {
 		return m, nil
 	}
+	// --inplace is destructive (replaces originals); mirror the CLI's y/N
+	// prompt with a second explicit keypress instead of starting on enter.
+	// --assume-yes (-y) skips this the same way it skips the CLI prompt.
+	if m.confirming {
+		switch msg.String() {
+		case "y", "Y":
+			m.confirming = false
+			m.pool = worker.New(m.cfg, m.db)
+			m.started = true
+			m.launch()
+			return m, listenForEvent(m.events)
+		default:
+			m.confirming = false
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "enter", "s":
+		if m.cfg.InPlace && !m.cfg.AssumeYes {
+			m.confirming = true
+			return m, nil
+		}
 		m.pool = worker.New(m.cfg, m.db)
 		m.started = true
 		m.launch()
@@ -529,6 +551,9 @@ func (m Model) View() string {
 		return m.scanErrView()
 	}
 	if !m.started {
+		if m.confirming {
+			return m.confirmInplaceView()
+		}
 		return m.preflightView()
 	}
 
@@ -686,10 +711,26 @@ func (m Model) preflightView() string {
 	b.WriteString(edit(fPreset, "preset", preset, "") + "\n")
 	b.WriteString(edit(fHWAccel, "hwaccel", m.cfg.HWAccel, "  → "+m.resolvedEncoder()) + "\n")
 	b.WriteString(edit(fWorkers, "workers", strconv.Itoa(m.cfg.Workers), "") + "\n")
+	if line := m.resourceProfileLine(); line != "" {
+		b.WriteString(line + "\n")
+	}
 	b.WriteString("\n")
 	b.WriteString(theme.Help.Render("  [↑↓/tab] field   [←→] change   [enter] start   [q] abort   [?] help"))
 	// Center the card so it scales with the terminal instead of hugging the corner.
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, theme.Box.Render(b.String()))
+}
+
+// confirmInplaceView blocks the pre-flight screen with a y/N-style prompt
+// before a destructive --inplace run, matching the CLI's confirmInplace.
+func (m Model) confirmInplaceView() string {
+	files := "files"
+	if len(m.files) == 1 {
+		files = "file"
+	}
+	content := theme.Title.Render("⚡ smelt — confirm") + "\n\n" +
+		theme.StatusErr.Render(fmt.Sprintf("--inplace will permanently replace %d original %s.", len(m.files), files)) + "\n\n" +
+		theme.Help.Render("  [y] continue   [any other key] cancel")
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, theme.Box.Render(content))
 }
 
 // resolvedEncoder is the concrete encoder for the hwaccel row, or a placeholder
@@ -702,6 +743,23 @@ func (m Model) resolvedEncoder() string {
 		return m.encoder + " (software)"
 	}
 	return m.encoder
+}
+
+// resourceProfileLine mirrors the CLI's LogResourceProfile warning on-screen:
+// smelt only ever accelerates encode, so a hardware backend means uncapped
+// software decode runs concurrently with the GPU/QSV/NVENC encode block —
+// the same information a TUI run would otherwise only get via a log line it
+// never renders. Empty while the probe is still in flight.
+func (m Model) resourceProfileLine() string {
+	if !m.resolved {
+		return ""
+	}
+	p := worker.BuildResourceProfile(m.encoder, m.backend, m.cfg.DecodeThreads)
+	label := fmt.Sprintf("  decode: %s", p.DecodeLabel())
+	if !p.Warn {
+		return theme.StatusPend.Render(label)
+	}
+	return theme.StatusErr.Render(label + "  ⚠ concurrent with hardware encode — see --decode-threads")
 }
 
 // outputSummary describes where finished files will land.

@@ -27,6 +27,8 @@ run.
 │   preset    ‹ medium ›                                 │
 │   hwaccel   ‹ auto › → hevc_nvenc                      │
 │   workers   ‹ 16 ›                                     │
+│   decode: software (uncapped)  ⚠ concurrent with       │
+│           hardware encode — see --decode-threads       │
 │                                                        │
 │   [↑↓/tab] field  [←→] change  [enter] start  [q] abort│
 └──────────────────────────────────────────────────────┘
@@ -36,12 +38,22 @@ run.
 |---|---|
 | `↑`/`↓`, `k`/`j`, `tab`/`shift+tab` | Move between fields (`▸` marks the focused one) |
 | `←`/`→`, `h`/`l` | Change the focused field's value |
-| `enter` / `s` | Start transcoding with the shown settings |
+| `enter` / `s` | Start transcoding with the shown settings (or, with `--inplace`, show the confirm screen below) |
 | `q` / `Ctrl+C` | Abort without touching any files |
 
 Editable fields: **codec** (`h264`/`h265`/`av1`/`vp9`), **crf** (0–51),
 **preset**, **hwaccel** (`auto`/`none`/backend), **workers**. Changing codec or
 hwaccel re-probes; the `hwaccel` row reads `resolving…` until the probe returns.
+
+The **resource-profile** row mirrors the same warning `smelt transcode` logs
+via zerolog when a hardware encoder resolves — the TUI doesn't render log
+lines, so without this row that warning would be invisible here. smelt only
+ever accelerates encode; decode is always software, so a resolved hardware
+backend means uncapped software decode runs concurrently with the GPU/QSV/NVENC
+encode block, the most thermally demanding combination. It reads
+`software (capped at N threads)` when `--decode-threads` is set, `software
+(uncapped)` otherwise, with the ⚠ warning appended only when a hardware
+backend actually resolved.
 
 The **preset** list is filtered to the encoder that was actually resolved, so
 you can only pick a value that encoder accepts:
@@ -56,9 +68,31 @@ you can only pick a value that encoder accepts:
 
 If a re-probe lands on an encoder for which the current preset isn't valid, it
 snaps to that encoder's default. Each field maps 1:1 to its CLI flag — the
-screen adds no behavior the flags can't express. For a destructive `--inplace`
-run, the confirmation prompt still happens on the normal terminal *before* this
-screen.
+screen adds no behavior the flags can't express.
+
+### `--inplace` confirmation
+
+`--inplace` permanently replaces the original files, so pressing `enter`/`s`
+with it set does not start the run — it opens a blocking confirm screen
+first, the TUI equivalent of `smelt transcode`'s `y/N` prompt:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ ⚡ smelt — confirm                                     │
+│                                                        │
+│  --inplace will permanently replace 4 original files. │
+│                                                        │
+│  [y] continue   [any other key] cancel                │
+└──────────────────────────────────────────────────────┘
+```
+
+| Key | Action |
+|---|---|
+| `y` / `Y` | Proceed with the run |
+| anything else (including `esc`) | Cancel and return to the configure screen |
+
+`-y`/`--assume-yes` skips this screen entirely, same as it skips the CLI's
+prompt.
 
 ---
 
