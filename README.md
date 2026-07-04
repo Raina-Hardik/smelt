@@ -167,8 +167,12 @@ depends on what you're running:
 systemd-run --scope -p CPUQuota=50% --nice=10 \
   smelt transcode --src /mnt/media --decode-threads 2 --workers 1
 
-# Lower scheduling/IO priority only (no hard cap) — any Linux/macOS, systemd or not
+# Lower scheduling + I/O priority only (no hard cap) — Linux only (ionice is
+# util-linux; macOS has `nice` but no `ionice` equivalent)
 nice -n 10 ionice -c2 -n7 smelt transcode --src /mnt/media --decode-threads 2
+
+# macOS: `nice` only (no ionice equivalent)
+nice -n 10 smelt transcode --src /mnt/media --decode-threads 2
 
 # Windows: no direct nice/ionice equivalent; lower the process priority instead
 start /low /wait smelt transcode --src D:\media --decode-threads 2

@@ -815,7 +815,7 @@ func (m Model) resourceProfileLine() string {
 	if !p.Warn {
 		return theme.StatusPend.Render(label)
 	}
-	return theme.StatusErr.Render(label + "  ⚠ concurrent with hardware encode — see --decode-threads")
+	return theme.StatusErr.Render(label + "  ⚠ concurrent with hardware encode — see --decode-threads/--workers")
 }
 
 // outputSummary describes where finished files will land.
