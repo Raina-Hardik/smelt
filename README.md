@@ -53,6 +53,18 @@ sudo mv smelt /usr/local/bin/
 go install github.com/Raina-Hardik/smelt@latest
 ```
 
+`Raina-Hardik` is case-sensitive — the module path is declared with that exact
+casing, and `raina-hardik` fails to resolve.
+
+Right after a new tag is pushed, `@latest` can resolve to a stale prior version
+for a while: the public Go module proxy caches `go list -m -versions` and can
+lag behind GitHub's tags. If `go install ...@latest` doesn't pick up a release
+you know exists, pin the version explicitly instead of waiting on the proxy:
+
+```bash
+GOPROXY=https://proxy.golang.org,direct go install github.com/Raina-Hardik/smelt@v0.17.0
+```
+
 ---
 
 ## Quick Start
@@ -141,20 +153,31 @@ is touched), and `--decode-threads N` caps the decoder's own thread count
 (unlike `--ffmpeg-arg -threads N`, which lands after `-i` and only constrains
 the encoder).
 
-Beyond that, smelt has no CPU/thermal governor of its own — throttle at the OS
-level:
+Beyond that, smelt has no CPU/thermal governor of its own, on any platform —
+`--decode-threads` and `--workers` are the two levers smelt itself gives you;
+everything past that is OS-level throttling, and which tool that means
+depends on what you're running:
 
 ```bash
-# Cap CPU quota and I/O priority for one run via systemd (cgroup-enforced,
-# unlike CPU affinity + nice/ionice chained through a shell, which can silently
-# fail to inherit across exec boundaries — verify with `taskset -p $$` inside
-# the actual ffmpeg process if you go that route)
+# systemd-based Linux only (cgroup-enforced, unlike CPU affinity + nice/ionice
+# chained through a shell, which can silently fail to inherit across exec
+# boundaries — verify with `taskset -p $$` inside the actual ffmpeg process
+# if you go that route). Not applicable on non-systemd inits (e.g. Void's
+# runit) or on Windows/macOS.
 systemd-run --scope -p CPUQuota=50% --nice=10 \
   smelt transcode --src /mnt/media --decode-threads 2 --workers 1
 
-# Lower scheduling/IO priority only (no hard cap)
+# Lower scheduling/IO priority only (no hard cap) — any Linux/macOS, systemd or not
 nice -n 10 ionice -c2 -n7 smelt transcode --src /mnt/media --decode-threads 2
+
+# Windows: no direct nice/ionice equivalent; lower the process priority instead
+start /low /wait smelt transcode --src D:\media --decode-threads 2
 ```
+
+The `resource profile` warning itself only ever suggests `--decode-threads`/
+`--workers` unconditionally, since those are the only levers guaranteed to
+exist everywhere smelt runs; it adds the `systemd-run` example on top only
+when `systemd-run` is actually found on `$PATH`.
 
 If a run needs to be stopped, prefer `Ctrl-C`/`q` (in the TUI) or `SIGTERM`
 over externally `SIGKILL`-ing the `smelt` process itself. smelt's own
@@ -192,6 +215,15 @@ default transcode flow:
   `smelt` subcommand that opts into the extra external-tool pipeline, kept
   separate from the default single-ffmpeg-invocation flow so the common case
   stays simple and dependency-light.
+
+A separate idea, for thermally-limited hardware rather than complex source
+material: **chunked/segmented transcode** — split a large file at keyframe
+boundaries, transcode each segment as its own ffmpeg invocation with a
+cool-down gap in between, then concatenate. Distinct from a thermal governor
+(see [Running politely on constrained hardware](#running-politely-on-constrained-hardware))
+because it bounds the *duration* of any single ffmpeg process rather than
+trying to cap its resource usage while it runs; the two are complementary, not
+alternatives. Not designed yet.
 
 Nothing here is scheduled — this is a place to collect ideas before design
 work starts.

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,10 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
+
+// lookPath is exec.LookPath, indirected so tests can force either branch of
+// GovernorHint without depending on what's actually installed on the runner.
+var lookPath = exec.LookPath
 
 type Pool struct {
 	cfg         *config.Config
@@ -94,6 +100,27 @@ func (r ResourceProfile) DecodeLabel() string {
 	return "software (uncapped)"
 }
 
+// GovernorHint suggests a concrete next step for the resource-profile
+// warning. smelt itself has no OS dependency beyond ffmpeg/ffprobe, and that
+// must hold for this hint too: not every Linux uses systemd (e.g. Void's
+// runit), and this warning also fires on Windows and macOS builds. So the
+// only suggestion made unconditionally is smelt's own cross-platform lever
+// (--decode-threads / --workers); a systemd-run example is appended only
+// when systemd-run is actually present on $PATH.
+func (r ResourceProfile) GovernorHint() string {
+	threads := r.DecodeThreads
+	if threads <= 0 {
+		threads = 2
+	}
+	hint := fmt.Sprintf("lower --decode-threads (try %d) and/or --workers", threads)
+	if runtime.GOOS == "linux" {
+		if _, err := lookPath("systemd-run"); err == nil {
+			hint += fmt.Sprintf("; or wrap the run: systemd-run --scope -p CPUQuota=50%% --nice=10 smelt transcode --decode-threads %d --workers 1 ...", threads)
+		}
+	}
+	return hint
+}
+
 // LogResourceProfile logs the decode/encode split for a resolved encoder
 // choice. Nothing here caps the combined load when Warn is true; the warning
 // exists so it's visible before ffmpeg starts, not discovered via a thermal
@@ -108,7 +135,8 @@ func LogResourceProfile(encoder, backend string, decodeThreads int) {
 		Str("decode", r.DecodeLabel()).
 		Str("encode", backend).
 		Str("encoder", encoder).
-		Msg("resource profile: software decode + hardware encode running concurrently; combined CPU+GPU load is not capped by smelt — see --decode-threads and --workers, or run under nice/ionice/systemd-run --scope -p CPUQuota= on thermally constrained hardware")
+		Str("try", r.GovernorHint()).
+		Msg("resource profile: software decode + hardware encode running concurrently; combined CPU+GPU load is not capped by smelt — see --decode-threads and --workers, or throttle at the OS level")
 }
 
 // Run transcodes all files, logging results via zerolog. Blocks until done.

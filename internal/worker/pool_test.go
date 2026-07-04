@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
@@ -37,6 +39,35 @@ func TestResourceProfileDecodeLabel(t *testing.T) {
 			t.Errorf("DecodeLabel(%d) = %q, want %q", c.threads, got, c.want)
 		}
 	}
+}
+
+func TestResourceProfileGovernorHint(t *testing.T) {
+	origLookPath := lookPath
+	defer func() { lookPath = origLookPath }()
+
+	t.Run("without systemd-run", func(t *testing.T) {
+		lookPath = func(string) (string, error) { return "", errors.New("not found") }
+		got := BuildResourceProfile("hevc_nvenc", "nvenc", 4).GovernorHint()
+		want := "lower --decode-threads (try 4) and/or --workers"
+		if got != want {
+			t.Errorf("GovernorHint() = %q, want %q", got, want)
+		}
+		if strings.Contains(got, "systemd-run") {
+			t.Errorf("GovernorHint() = %q, should not suggest systemd-run when absent", got)
+		}
+	})
+
+	t.Run("with systemd-run on linux", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("systemd-run branch only applies on linux")
+		}
+		lookPath = func(string) (string, error) { return "/usr/bin/systemd-run", nil }
+		got := BuildResourceProfile("hevc_nvenc", "nvenc", 0).GovernorHint()
+		want := "lower --decode-threads (try 2) and/or --workers; or wrap the run: systemd-run --scope -p CPUQuota=50% --nice=10 smelt transcode --decode-threads 2 --workers 1 ..."
+		if got != want {
+			t.Errorf("GovernorHint() = %q, want %q", got, want)
+		}
+	})
 }
 
 func TestOutputPath(t *testing.T) {
