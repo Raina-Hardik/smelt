@@ -130,8 +130,9 @@ CLI flags / config.yaml / env vars
    goroutine that runs `ffmpeg.Run()` and releases the slot. The semaphore caps
    parallelism at exactly `cfg.Workers`; pausing withholds *new* dispatch while
    in-flight jobs run on. The encoder is resolved once per run (`ResolveEncoder`,
-   a functional GPU probe) and reused for every file. After each encode the result
-   (success or failure) is written to the history DB via `pool.record()`.
+   a functional GPU probe) and reused for every file; the decode side is decided
+   *per file* at dispatch time (see "Hardware pipeline" below). After each encode
+   the result (success or failure) is written to the history DB via `pool.record()`.
 
 4. **ffmpeg runner** — `ffmpeg.Run(ctx, src, dst, spec, onProgress)` takes a
    resolved `EncodeSpec` (codec, crf, preset, audio, container, resolved
@@ -151,6 +152,68 @@ CLI flags / config.yaml / env vars
 6. **Reporter** — In CLI mode the pool logs each event via `zerolog`. In TUI
    mode the callbacks send typed `tea.Msg` values to a buffered channel that
    the bubbletea event loop drains.
+
+---
+
+## Hardware pipeline
+
+The **same-device invariant**: when hardware decode is active, decode happens
+on the *same* device the resolved encoder uses — the VAAPI render node, the
+QSV device, the CUDA GPU. There is no cross-device mode (decode on iGPU,
+encode on dGPU); frames never cross a device boundary. Either the whole video
+pipeline lives on one device, or decode is software. In `EncodeSpec` terms:
+`DecodeBackend` is either `""` (software decode) or equal to `Backend`.
+
+Two functional probe layers, both cached, neither trusting `ffmpeg -encoders`
+/ `-decoders` listings (compiled-in ≠ usable):
+
+1. **Encoder probe** (`probeEncoder`) — once per run, a tiny lavfi test encode
+   per candidate backend. Cached per encoder name; only positive results are
+   cached (a timeout under load is not evidence of absence). When a run
+   contains ≥1 ten-bit source, the encoder is additionally probed for `main10`
+   with a p010 lavfi source (cache key `<enc>:main10`).
+2. **Decode probe** (`ProbeDecode`) — lazy, per file *shape*, at dispatch time
+   inside the worker: decodes 3 frames of the actual file with the backend's
+   hwaccel args. Cache key is `(backend, codec, profile, pix_fmt)` — not the
+   file path — so a library of identically-shaped files pays one ~1 s probe.
+   Negative results mean software decode for that shape (silently; this is
+   normal). A hardware-decode *runtime* failure evicts the positive cache
+   entry for that shape so identical files don't all pay a fail-then-retry
+   cycle. Probes never run for files the plan already skipped.
+
+**Per-file fallback**: if ffmpeg exits non-zero while hardware decode was
+active, the worker deletes the transient, logs a warning, and retries that
+file exactly once with software decode (same encoder, `-threads` cap
+restored). No stderr classification — one wasted attempt on a genuine encode
+failure is an acceptable cost for not parsing ffmpeg stderr heuristically. A
+second failure is a normal file failure, counted once.
+
+**Bit depth**: `ProbeAttrs` derives the source bit depth from `pix_fmt`.
+10-bit sources ride the hardware pipeline only when the device's encoder
+passed the `main10` probe (`-profile:v main10` on `hevc_*`; AV1 encoders take
+10-bit input without a profile flag). If it didn't, the whole file takes the
+software pipeline — smelt never silently flattens 10-bit content to 8-bit.
+Sources that are neither 8-bit nor supported 10-bit (12-bit, 4:2:2, 4:4:4)
+always take the software pipeline. On the software-decode VAAPI path, the
+upload filter is bit-depth aware: `format=nv12,hwupload` (8-bit) /
+`format=p010,hwupload` (10-bit).
+
+Command shapes (validated on real hardware; `[10bit]` = only for 10-bit
+sources on a main10-capable device):
+
+```
+vaapi:  -vaapi_device <node> -hwaccel vaapi -hwaccel_output_format vaapi \
+          -i src … -c:v hevc_vaapi -rc_mode CQP -qp <crf> [10bit: -profile:v main10]
+qsv:    -init_hw_device qsv=qsv:hw_any -hwaccel qsv -hwaccel_output_format qsv \
+          -i src … -c:v hevc_qsv -q:v <crf> [10bit: -profile:v main10]
+nvenc:  -hwaccel cuda -hwaccel_output_format cuda \
+          -i src … -c:v hevc_nvenc -rc vbr -cq <crf> [10bit: -profile:v main10]
+```
+
+No upload filter on any hardware-decode shape — frames are already device
+surfaces. `amf` and `videotoolbox` are encode-only backends this release:
+`ProbeDecode` returns false for them without probing, so decode is always
+software there.
 
 ---
 
