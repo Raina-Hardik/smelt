@@ -18,6 +18,7 @@ smelt/
 │   ├── clean.go             `smelt clean` — remove orphaned .transcoded partial artifacts
 │   ├── history.go           `smelt history` — query the SQLite history DB
 │   ├── workflow.go          `smelt workflow` — emits a schedulable shell script
+│   ├── watch.go             `smelt watch` — polls --src on a timer, reusing scanner+worker.Plan each pass
 │   ├── config.go            `smelt config init` — writes starter config.yaml
 │   └── version.go           `smelt version` — prints build metadata
 └── internal/                All business logic; not importable outside the module

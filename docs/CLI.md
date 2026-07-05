@@ -46,6 +46,7 @@ Available Commands:
   transcode   Transcode media files in a directory
   tui         Launch the interactive transcoding TUI
   version     Print smelt version information
+  watch       Continuously scan a directory and transcode new or changed files
   workflow    Generate a schedulable shell script for a transcode job
 
 Flags:
@@ -183,6 +184,139 @@ Global Flags:
 | `--suffix` | string | `.smelt` | Filename suffix for outputs written alongside the source (`<name><suffix><ext>`). Ignored for `--inplace` and `--output-dir`. |
 | `--to` | string | _(keep source)_ | Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags HEVC as `hvc1`. Mutually exclusive with `--inplace`. |
 | `--workers` | int | `0` | Maximum number of simultaneous ffmpeg processes. `0` means `runtime.NumCPU()`. Note this only bounds *how many files* run concurrently — it has no effect on a single large file, where one ffmpeg process is free to use all available cores/threads on both decode and encode. For a lone huge source, use `--decode-threads`, `--preset`, or an OS-level throttle (see [Running politely on constrained hardware](../README.md#running-politely-on-constrained-hardware)). |
+
+---
+
+## `smelt watch`
+
+Poll `--src` on a timer and transcode files that are new or not yet up to
+date since the last pass. Each pass is an ordinary transcode run — same scan,
+same `worker.Plan` skip logic, same worker pool — so already-transcoded
+outputs are left alone; only files that are new or fail the up-to-date check
+are re-transcoded. Accepts every `smelt transcode` flag to configure the job.
+
+There is no separate polling mechanism to reason about: a pass is exactly
+what `smelt transcode` already does once, run in a loop with a sleep between
+passes. This keeps `watch` a pure Go loop with no external process spawning
+of its own (beyond ffmpeg/ffprobe for the transcodes themselves), so it
+behaves identically on Linux, macOS, and Windows.
+
+With `--once`, runs a single pass and exits instead of looping — useful to
+validate the configuration (especially combined with `--dry-run`) before
+leaving it running unattended. Stops cleanly on Ctrl-C / SIGTERM, letting any
+in-flight transcode finish its own cancellation handling (transient
+`.transcoded` cleanup) before exiting.
+
+`--inplace` prompts for confirmation once, at startup, rather than once per
+pass — a long-running watch may run thousands of passes, and prompting on
+every one would make unattended operation impossible. Pass `-y` to skip the
+prompt entirely (required for a non-interactive daemon, e.g. under systemd).
+
+### Synopsis
+
+```
+smelt watch [flags]
+```
+
+### Examples
+
+```bash
+# Rescan every 5 minutes, transcoding new files to H.265
+smelt watch --src /mnt/media --ext mkv,mp4 --codec h265 --interval 5m
+
+# Apply a named profile, checking half-hourly
+smelt watch --src /mnt/media --profile web --interval 30m
+
+# Validate the plan once before committing to an unattended run
+smelt watch --src /mnt/media --once --dry-run
+
+# Unattended in-place watch (confirmation suppressed with -y)
+smelt watch --src /mnt/media --inplace --interval 1h -y
+```
+
+### `--help` output
+
+```
+Poll a source directory on a timer, transcoding files that are new or not
+yet up to date since the last pass. Accepts every 'smelt transcode' flag to
+configure the job; each poll is otherwise an ordinary transcode run — same
+scan, same skip/plan logic (so already-transcoded files are left alone),
+same worker pool. Runs until interrupted (Ctrl-C / SIGTERM).
+
+With --once, runs a single pass and exits instead of looping — useful to
+dry-run the configuration before leaving it running unattended.
+
+Usage:
+  smelt watch [flags]
+
+Examples:
+  smelt watch --src /mnt/media --ext mkv,mp4 --codec h265 --interval 5m
+  smelt watch --src /mnt/media --profile web --interval 30m
+  smelt watch --src /mnt/media --once --dry-run
+  smelt watch --src /mnt/media --inplace --interval 1h -y
+
+Flags:
+      --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
+      --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
+      --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
+      --dry-run                         print each pass's transcode plan without executing anything
+      --ext strings                     file extensions to match (default [mkv,mp4,avi])
+      --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
+      --force                           re-transcode even if the output file already exists
+  -h, --help                            help for watch
+      --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
+      --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
+      --interval duration               how often to rescan --src for new or changed files (default 5m0s)
+      --name string                     name recorded against each pass's run in the history DB (default "watch")
+      --once                            run a single scan-and-transcode pass and exit, instead of looping
+      --output-dir string               write output files to this directory instead of alongside source
+      --preset string                   encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
+      --profile string                  named profile preset from config; explicit flags still override it
+      --skip-hardlinked                 with --inplace, skip files that are hardlinked elsewhere (transcoding would break the link and double disk usage)
+      --skip-source-codec stringArray   skip files whose current video codec matches; repeatable (e.g. --skip-source-codec av1 to never downgrade AV1 files)
+      --src string                      source directory to scan (default ".")
+      --subs string                     subtitle stream handling: copy (preserve all subtitle tracks) | drop (strip all subtitles) (default "copy")
+      --suffix string                   filename suffix for outputs written alongside the source (default ".smelt")
+      --to string                       target container/format for outputs: mp4|mkv|webm|... (default: keep source container)
+      --workers int                     maximum parallel transcode jobs; 0 = runtime.NumCPU()
+
+Global Flags:
+  -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
+      --config string       path to config file; searches ./config.yaml then the platform config dir (e.g. ~/.config/smelt/config.yaml on Linux)
+      --db string           path to the SQLite history database; set to "" to disable (default "$XDG_DATA_HOME/smelt/history.db")
+      --log-format string   log output format: auto|json|pretty (default "auto")
+      --log-level string    log level: debug|info|warn|error (default "info")
+      --run-id string       unique identifier for this run; written to the history DB for dashboard tracking (auto-generated by the server; leave unset for manual CLI use)
+```
+
+### Flag reference
+
+Every `smelt transcode` flag is accepted; see the [`smelt transcode` flag
+reference](#flag-reference) above. Flags unique to `watch`:
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--interval` | duration | `5m` | How often to rescan `--src`. Must be `> 0` unless `--once` is set. Go duration syntax, e.g. `30s`, `5m`, `1h`. |
+| `--once` | bool | `false` | Run a single scan-plan-transcode pass and exit instead of looping. Combine with `--dry-run` to validate a configuration before running unattended. |
+| `--name` | string | `watch` | Name recorded against each pass's run row in the history DB (each pass gets its own run ID). |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Clean stop (Ctrl-C/SIGTERM), or `--once` completed with no failures |
+| 2 | Flag validation error (e.g. `--interval 0` without `--once`, mutually-exclusive `--inplace`/`--output-dir`, unknown `--codec`) |
+| 3 | `--once` only: one or more files failed to transcode in the single pass |
+
+Without `--once`, a pass with per-file failures logs the error and the loop
+continues to the next pass rather than exiting — a long-running watch should
+not die over one bad file. Check the history DB (`smelt history`) or logs for
+failures. With `--once`, a failed pass is instead reported via the exit code
+(3), matching `smelt transcode`'s behavior, so scripts/cron invocations can
+detect it.
 
 ---
 

@@ -22,6 +22,7 @@ everything — fast, observable, and cancellable.
 - **Hardlink-aware** — `--skip-hardlinked` spares files hardlinked elsewhere (e.g. a seedbox/ARR setup)
 - **Named profiles** — define `web`, `archive`, and custom codec/CRF/preset combinations in `config.yaml`
 - **Workflows** — `smelt workflow` emits a schedulable, flock-guarded shell script (cron-friendly)
+- **Continuous watch** — `smelt watch` polls a directory on a timer and transcodes only new or changed files, using the same skip logic as a plain `transcode` run
 - **Dry-run mode** — inspect the full transcode plan without touching any file
 - **In-place replacement** — atomically replaces originals after a confirmed successful transcode
 - **Context-aware cancellation** — Ctrl+C / `q` cleanly kills all in-flight ffmpeg processes and removes partial output
@@ -93,6 +94,9 @@ smelt tui --src /mnt/media
 
 # Generate a schedulable nightly workflow script
 smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
+
+# Watch a directory continuously, transcoding new files every 5 minutes
+smelt watch --src /mnt/media --codec h265 --interval 5m
 
 # Generate a starter config.yaml
 smelt config init
