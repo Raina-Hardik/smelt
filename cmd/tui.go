@@ -16,12 +16,12 @@ var tuiCmd = &cobra.Command{
 	Long: `Launch the interactive transcoding TUI. Opens instantly; scans the source
 directory and builds the transcode plan in the background while showing a
 "Scanning…" state. Once ready, an editable configure screen appears — adjust
-codec, CRF, preset, hwaccel, workers, decode-thread cap, audio codec/bitrate,
-subtitle mode, and inplace, and see the concrete encoder that --hwaccel
-resolves to plus a live decode/encode resource-profile warning. Press enter
-to start (or, with inplace on, confirm first); jobs then run in parallel with
-live progress, worker status, and logs. Press q or Ctrl+C to cancel running
-jobs cleanly and quit.`,
+codec, CRF, preset, hwaccel, hwdecode, workers, decode-thread cap, audio
+codec/bitrate, subtitle mode, and inplace, and see the concrete encoder that
+--hwaccel resolves to plus a live decode row and resource-profile warning.
+Press enter to start (or, with inplace on, confirm first); jobs then run in
+parallel with live progress, worker status, and logs. Press q or Ctrl+C to
+cancel running jobs cleanly and quit.`,
 	RunE: runTUI,
 }
 

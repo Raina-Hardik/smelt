@@ -233,7 +233,7 @@ func addTranscodeFlags(cmd *cobra.Command) {
 	)
 	cmd.Flags().Int(
 		"decode-threads", 0,
-		"cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder",
+		"cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path",
 	)
 	cmd.Flags().Bool(
 		"i-know-this-drops-hdr", false,
