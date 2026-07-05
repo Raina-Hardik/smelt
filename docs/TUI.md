@@ -26,10 +26,10 @@ run.
 │   crf       ‹ 23 ›                                     │
 │   preset    ‹ medium ›                                 │
 │   hwaccel   ‹ auto › → hevc_nvenc                      │
+│   hwdecode  ‹ auto ›                                   │
 │   workers   ‹ 16 ›                                     │
 │   decode    ‹ uncapped ›                               │
-│   decode: software (uncapped)  ⚠ concurrent with       │
-│           hardware encode — see --decode-threads       │
+│   decode: hw: nvenc (per-file, may fall back)          │
 │   audio     ‹ copy ›                                    │
 │   bitrate   ‹ n/a ›                                     │
 │   subs      ‹ copy ›                                    │
@@ -54,6 +54,7 @@ Editable fields, top to bottom:
 | **crf** | `0`–`51` | `--crf` |
 | **preset** | filtered to the resolved encoder — see table below | `--preset` |
 | **hwaccel** | `auto` / `none` / backend | `--hwaccel` |
+| **hwdecode** | `auto` / `off` | `--hwdecode` |
 | **workers** | `1`–`256` | `--workers` |
 | **decode** | `uncapped` or a thread count | `--decode-threads` |
 | **audio** | `copy` / `aac` / `opus` / `mp3` / `ac3` / `flac` | `--audio-codec` |
@@ -62,19 +63,30 @@ Editable fields, top to bottom:
 | **inplace** | `off` / `on` (⚠ replaces originals) | `--inplace` |
 
 Changing codec or hwaccel re-probes; the `hwaccel` row reads `resolving…`
-until the probe returns. The `bitrate` field is a no-op while `audio` is
+until the probe returns. Per-file decode probes are keyed by backend, so
+flipping `hwaccel` or `hwdecode` live re-probes correctly once the run starts. The `bitrate` field is a no-op while `audio` is
 `copy` — matching the CLI, where `--audio-bitrate` is ignored in that case —
 so it never queues a value that would never reach the ffmpeg invocation.
 
 The **resource-profile** row (directly under `decode`) mirrors the same
-warning `smelt transcode` logs via zerolog when a hardware encoder resolves —
-the TUI doesn't render log lines, so without this row that warning would be
-invisible here. smelt only ever accelerates encode; decode is always
-software, so a resolved hardware backend means uncapped software decode runs
-concurrently with the GPU/QSV/NVENC encode block, the most thermally
-demanding combination. It reads `software (capped at N threads)` when
-`decode` is set above zero, `software (uncapped)` otherwise, with the ⚠
-warning appended only when a hardware backend actually resolved.
+resource-profile line `smelt transcode` logs via zerolog — the TUI doesn't
+render log lines, so without this row it would be invisible here. It is
+tri-state:
+
+- `hw: <backend> (per-file, may fall back)` — a hardware encoder resolved on
+  `nvenc`/`qsv`/`vaapi` and `hwdecode` is `auto`: decode runs on the same
+  device for every file the per-file probe confirms; individual files may
+  still fall back to software decode (probe miss or runtime retry). No
+  warning — this is the full-hardware pipeline. Probes run per file at
+  dispatch time, so the row never fakes certainty before they run.
+- `software (capped at N threads)` / `software (uncapped)` with the ⚠
+  warning appended — a hardware encoder resolved but decode is software
+  (`hwdecode` set to `off`, or an encode-only `amf`/`videotoolbox` backend):
+  uncapped software decode runs concurrently with the GPU/QSV/NVENC encode
+  block, the most thermally demanding combination — see
+  `--hwdecode`/`--decode-threads`/`--workers`.
+- `software (…)` with no warning — software encode; nothing concurrent to
+  warn about.
 
 The **preset** list is filtered to the encoder that was actually resolved, so
 you can only pick a value that encoder accepts:
