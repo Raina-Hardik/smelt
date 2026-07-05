@@ -125,15 +125,17 @@ fi
 
 RUN_ID="${SMELT_RUN_ID:-$(date +%s)-$$}"
 
-'/usr/bin/smelt' each --src '/mnt/media' --ext 'mkv,mp4' --name 'nightly' --run-id "$RUN_ID" | while IFS= read -r _smelt_file; do
-	if '/usr/bin/smelt' match "$_smelt_file" --codec-ne hevc --height-gt 1080; then
-		'/usr/bin/smelt' do "$_smelt_file" transcode --codec 'h265' --crf '24' --run-id "$RUN_ID" -y || true
-	elif '/usr/bin/smelt' match "$_smelt_file" --codec-ne hevc; then
-		'/usr/bin/smelt' do "$_smelt_file" transcode --codec 'h265' --crf '23' --run-id "$RUN_ID" -y || true
+'/usr/bin/smelt' each --src '/mnt/media' --ext 'mkv,mp4' --name 'nightly' --run-id "$RUN_ID" --db '/home/user/.local/share/smelt/history.db' | while IFS= read -r _smelt_file; do
+	if '/usr/bin/smelt' match "$_smelt_file" --codec-ne 'hevc' --height-gt '1080'; then
+		'/usr/bin/smelt' do "$_smelt_file" transcode --codec h265 --crf 24 --run-id "$RUN_ID" -y --db '/home/user/.local/share/smelt/history.db' || true
+	elif '/usr/bin/smelt' match "$_smelt_file" --codec-ne 'hevc'; then
+		'/usr/bin/smelt' do "$_smelt_file" transcode --codec h265 --crf 23 --run-id "$RUN_ID" -y --db '/home/user/.local/share/smelt/history.db' || true
+	else
+		:
 	fi
 done
 
-'/usr/bin/smelt' finish-run --run-id "$RUN_ID"
+'/usr/bin/smelt' finish-run --run-id "$RUN_ID" --db '/home/user/.local/share/smelt/history.db'
 ```
 
 Walk through:
@@ -222,6 +224,21 @@ Omit the `when` clause for a catch-all rule that matches every file.
 | `lt` | less than |
 | `ge` | greater than or equal to |
 | `le` | less than or equal to |
+
+Not every operator is valid for every field — each field maps to a `smelt match`
+flag, and `smelt match --help` only defines a subset of `--<field>-<op>` flags
+per field:
+
+| Field | Valid operators |
+|---|---|
+| `codec`, `audio`, `ext` | `eq`, `ne` |
+| `height` | `gt`, `lt`, `ge`, `le` |
+| `width`, `bitrate`, `duration` | `gt`, `lt` |
+
+The rule parser does **not** enforce this — a rule like `when width le 1920 do
+...` renders without error, but the generated script fails at run time with
+`Error: unknown flag: --width-le`. Stick to the valid-operator table above
+until this is validated at `smelt workflow` render time.
 
 ### Actions
 
