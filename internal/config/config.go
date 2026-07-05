@@ -65,6 +65,23 @@ func Defaults() *Config {
 	}
 }
 
+// getStringSlice wraps viper.GetStringSlice with comma-splitting for values
+// sourced from a flat SMELT_ env var (e.g. SMELT_EXT=mkv,mp4,avi). Viper's
+// cast never splits a plain string on commas — flags and config.yaml lists
+// already arrive as multiple elements, so this only ever fires for the env
+// path, and only when it wouldn't otherwise change a legitimate single value.
+func getStringSlice(key string) []string {
+	vals := viper.GetStringSlice(key)
+	if len(vals) == 1 && strings.Contains(vals[0], ",") {
+		parts := strings.Split(vals[0], ",")
+		for i, p := range parts {
+			parts[i] = strings.TrimSpace(p)
+		}
+		return parts
+	}
+	return vals
+}
+
 // Load reads the current viper state and returns a fully resolved Config.
 func Load() *Config {
 	profileExtra := applyProfile()
@@ -95,7 +112,7 @@ func Load() *Config {
 		LogFormat: viper.GetString("smelt.log_format"),
 
 		Src:              viper.GetString("transcode.src"),
-		Ext:              viper.GetStringSlice("transcode.ext"),
+		Ext:              getStringSlice("transcode.ext"),
 		Codec:            viper.GetString("transcode.codec"),
 		CRF:              viper.GetInt("transcode.crf"),
 		Preset:           viper.GetString("transcode.preset"),
@@ -104,7 +121,7 @@ func Load() *Config {
 		HWAccel:          hwaccel,
 		InPlace:          viper.GetBool("transcode.inplace"),
 		SkipHardlinked:   viper.GetBool("transcode.skip_hardlinked"),
-		SkipSourceCodecs: viper.GetStringSlice("transcode.skip_source_codecs"),
+		SkipSourceCodecs: getStringSlice("transcode.skip_source_codecs"),
 		Force:            viper.GetBool("transcode.force"),
 		Container:        strings.TrimPrefix(viper.GetString("transcode.to"), "."),
 		OutputDir:        viper.GetString("transcode.output_dir"),

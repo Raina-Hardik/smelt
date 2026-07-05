@@ -84,6 +84,44 @@ func init() {
 	_ = viper.BindPFlag("smelt.run_id", rootCmd.PersistentFlags().Lookup("run-id"))
 }
 
+// envVarBindings maps every viper key documented as env-configurable
+// (docs/CONFIG.md) to its flat SMELT_ name. AutomaticEnv alone can't produce
+// these from dotted keys (transcode.audio_codec, ...) — it would look for
+// SMELT_TRANSCODE_AUDIO_CODEC — so each needs an explicit BindEnv.
+var envVarBindings = map[string]string{
+	"smelt.workers":                "SMELT_WORKERS",
+	"smelt.log_level":              "SMELT_LOG_LEVEL",
+	"smelt.log_format":             "SMELT_LOG_FORMAT",
+	"smelt.db":                     "SMELT_DB",
+	"transcode.src":                "SMELT_SRC",
+	"transcode.ext":                "SMELT_EXT",
+	"transcode.codec":              "SMELT_CODEC",
+	"transcode.crf":                "SMELT_CRF",
+	"transcode.preset":             "SMELT_PRESET",
+	"transcode.hwaccel":            "SMELT_HWACCEL",
+	"transcode.audio_codec":        "SMELT_AUDIO_CODEC",
+	"transcode.audio_bitrate":      "SMELT_AUDIO_BITRATE",
+	"transcode.subs":               "SMELT_SUBS",
+	"transcode.skip_source_codecs": "SMELT_SKIP_SOURCE_CODEC",
+	"transcode.inplace":            "SMELT_INPLACE",
+	"transcode.skip_hardlinked":    "SMELT_SKIP_HARDLINKED",
+	"transcode.force":              "SMELT_FORCE",
+	"transcode.to":                 "SMELT_TO",
+	"transcode.output_dir":         "SMELT_OUTPUT_DIR",
+	"transcode.suffix":             "SMELT_SUFFIX",
+	"transcode.decode_threads":     "SMELT_DECODE_THREADS",
+	"transcode.allow_hdr_loss":     "SMELT_ALLOW_HDR_LOSS",
+}
+
+// bindEnvVars wires envVarBindings into viper so CLI flag > env var >
+// config.yaml > default precedence (viper's native Set/flag/env/config/default
+// order) holds for every documented SMELT_ variable.
+func bindEnvVars() {
+	for key, env := range envVarBindings {
+		_ = viper.BindEnv(key, env)
+	}
+}
+
 // initLogger installs a sensible default before flags/config are resolved.
 // configureLogger is called again from the command path once *Config is loaded.
 func initLogger() { configureLogger("info", "auto") }
@@ -146,6 +184,7 @@ func initConfig() {
 	}
 	viper.SetEnvPrefix("SMELT")
 	viper.AutomaticEnv()
+	bindEnvVars()
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, notFound := err.(viper.ConfigFileNotFoundError); !notFound {

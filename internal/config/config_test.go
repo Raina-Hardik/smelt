@@ -29,6 +29,29 @@ func TestLoadAppliesProfile(t *testing.T) {
 	}
 }
 
+func TestGetStringSliceSplitsEnvCommaValue(t *testing.T) {
+	viper.Reset()
+	_ = viper.BindEnv("transcode.ext", "SMELT_EXT")
+	t.Setenv("SMELT_EXT", "mkv,mp4,avi")
+
+	got := getStringSlice("transcode.ext")
+	want := []string{"mkv", "mp4", "avi"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("getStringSlice = %v, want %v", got, want)
+	}
+}
+
+func TestGetStringSlicePassesThroughConfigList(t *testing.T) {
+	viper.Reset()
+	viper.Set("transcode.ext", []string{"mkv", "mp4"})
+
+	got := getStringSlice("transcode.ext")
+	want := []string{"mkv", "mp4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("getStringSlice = %v, want %v", got, want)
+	}
+}
+
 func TestExplicitFlagOverridesProfile(t *testing.T) {
 	viper.Reset()
 	setWebProfile()

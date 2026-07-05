@@ -65,10 +65,6 @@ profiles:
 
 ## Key Reference
 
-Every key below can be set in `config.yaml` or via its CLI flag (flag always
-wins). `SMELT_`-prefixed environment variables are not currently wired up
-despite older docs suggesting otherwise — see [CLI.md](CLI.md#environment-variables).
-
 ### `smelt` section
 
 Controls global runtime behaviour.
@@ -80,6 +76,7 @@ Controls global runtime behaviour.
 | Type | `int` |
 | Default | `0` (resolved to `runtime.NumCPU()` at startup) |
 | CLI flag | `--workers` |
+| Env var | `SMELT_WORKERS` |
 
 Maximum number of ffmpeg processes that may run simultaneously. A value of `0`
 automatically uses all logical CPU cores. Set a lower value on machines shared
@@ -98,6 +95,7 @@ smelt:
 | Default | `info` |
 | Valid values | `debug` \| `info` \| `warn` \| `error` |
 | CLI flag | `--log-level` |
+| Env var | `SMELT_LOG_LEVEL` |
 
 Controls log verbosity. `debug` emits per-file progress on every ffmpeg stderr
 line; `error` shows only failures.
@@ -115,6 +113,7 @@ smelt:
 | Default | `auto` |
 | Valid values | `auto` \| `json` \| `pretty` |
 | CLI flag | `--log-format` |
+| Env var | `SMELT_LOG_FORMAT` |
 
 `auto` selects `pretty` (colorized, human-readable) when stderr is a TTY, and
 `json` (newline-delimited JSON objects) otherwise. Logs are written to stderr;
@@ -132,6 +131,7 @@ smelt:
 | Type | `string` |
 | Default | Platform data directory — see below |
 | CLI flag | `--db` |
+| Env var | `SMELT_DB` |
 
 Path to the SQLite history database. Every completed transcode (success or
 failure) is recorded here with timestamps, encoder settings, elapsed time, and
@@ -165,6 +165,7 @@ Controls how files are discovered and how ffmpeg is invoked.
 | Type | `string` |
 | Default | `.` (current directory) |
 | CLI flag | `--src` |
+| Env var | `SMELT_SRC` |
 
 Root directory for the recursive media scan. All subdirectories are walked.
 Symlinks are not followed.
@@ -181,6 +182,7 @@ transcode:
 | Type | `[]string` |
 | Default | `[mkv, mp4, avi]` |
 | CLI flag | `--ext` |
+| Env var | `SMELT_EXT` |
 
 File extensions to include in the scan. Case-insensitive. Leading dots are
 stripped automatically, so `mkv` and `.mkv` are equivalent.
@@ -198,6 +200,7 @@ transcode:
 | Default | `h265` |
 | Valid values | `h264` \| `h265` \| `av1` \| `vp9` |
 | CLI flag | `--codec` |
+| Env var | `SMELT_CODEC` |
 
 Target video codec. smelt maps these aliases to the correct ffmpeg encoder:
 
@@ -223,6 +226,7 @@ transcode:
 | Default | `23` |
 | Range | `0–51` |
 | CLI flag | `--crf` |
+| Env var | `SMELT_CRF` |
 
 Constant Rate Factor. Controls the trade-off between quality and file size.
 Lower values produce larger, higher-quality files. Typical ranges:
@@ -247,6 +251,7 @@ transcode:
 | Type | `string` |
 | Default | `medium` |
 | CLI flag | `--preset` |
+| Env var | `SMELT_PRESET` |
 
 Encoding preset (speed vs. size at a given CRF). x264/x265 presets, fastest to
 slowest: `ultrafast`, `superfast`, `veryfast`, `faster`, `fast`, `medium`,
@@ -268,6 +273,7 @@ transcode:
 | Default | `auto` |
 | Valid values | `auto` \| `none` \| `nvenc` \| `qsv` \| `vaapi` \| `amf` \| `videotoolbox` |
 | CLI flag | `--hwaccel` |
+| Env var | `SMELT_HWACCEL` |
 
 Hardware-accelerated encoding. `auto` *functionally probes* for a usable GPU
 encoder for the target codec (running a tiny test encode — compiled-in is not
@@ -296,6 +302,7 @@ transcode:
 | Default | `copy` |
 | Valid values | `copy` \| `aac` \| `opus` \| `mp3` \| `ac3` \| `flac` |
 | CLI flag | `--audio-codec` |
+| Env var | `SMELT_AUDIO_CODEC` |
 
 `copy` stream-copies the audio untouched (no re-encode). Any other value
 re-encodes (`opus` → `libopus`, `mp3` → `libmp3lame`, etc.).
@@ -312,6 +319,7 @@ transcode:
 | Type | `string` |
 | Default | `""` (encoder default) |
 | CLI flag | `--audio-bitrate` |
+| Env var | `SMELT_AUDIO_BITRATE` |
 
 Target audio bitrate when re-encoding, e.g. `192k`. Ignored when
 `audio_codec: copy`.
@@ -329,6 +337,7 @@ transcode:
 | Default | `copy` |
 | Valid values | `copy` \| `drop` |
 | CLI flag | `--subs` |
+| Env var | `SMELT_SUBS` |
 
 Subtitle stream handling. `copy` preserves all subtitle tracks from the source
 (the default, so embedded subtitles survive transcoding). `drop` strips all
@@ -348,6 +357,7 @@ transcode:
 | Type | `[]string` |
 | Default | `[]` (skip nothing) |
 | CLI flag | `--skip-source-codec` (repeatable) |
+| Env var | `SMELT_SKIP_SOURCE_CODEC` |
 
 Skip files whose current video codec matches any entry in this list. Accepts the
 same aliases as `transcode.codec` (`h264`, `h265`, `av1`, `vp9`) as well as raw
@@ -366,6 +376,7 @@ transcode:
 | Type | `bool` |
 | Default | `false` |
 | CLI flag | `--inplace` |
+| Env var | `SMELT_INPLACE` |
 
 When `true`, atomically replaces the original file with the transcoded output
 after a confirmed successful ffmpeg exit. The original is **unrecoverable**
@@ -386,6 +397,7 @@ transcode:
 | Type | `bool` |
 | Default | `false` |
 | CLI flag | `--skip-hardlinked` |
+| Env var | `SMELT_SKIP_HARDLINKED` |
 
 With `inplace: true`, skip files whose hardlink count is greater than one.
 Transcoding replaces the inode, which breaks the hardlink (e.g. to a torrent
@@ -404,6 +416,7 @@ transcode:
 | Type | `bool` |
 | Default | `false` |
 | CLI flag | `--force` |
+| Env var | `SMELT_FORCE` |
 
 Re-transcode even when a file is already up to date. Disables all skipping:
 normal runs otherwise skip existing outputs (and smelt's own `<suffix>` files);
@@ -421,6 +434,7 @@ transcode:
 | Type | `string` |
 | Default | `""` (keep source container) |
 | CLI flag | `--to` |
+| Env var | `SMELT_TO` |
 
 Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the
 container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags
@@ -438,6 +452,7 @@ transcode:
 | Type | `string` |
 | Default | `""` (alongside source) |
 | CLI flag | `--output-dir` |
+| Env var | `SMELT_OUTPUT_DIR` |
 
 When set, all output files are written into this directory, preserving the
 relative path structure from `transcode.src`. The directory must already exist.
@@ -455,6 +470,7 @@ transcode:
 | Type | `string` |
 | Default | `.smelt` |
 | CLI flag | `--suffix` |
+| Env var | `SMELT_SUFFIX` |
 
 Filename suffix for outputs written alongside the source (`<name><suffix><ext>`),
 e.g. `movie.smelt.mkv`. Ignored for `inplace` and `output_dir`. (During encoding
@@ -473,6 +489,7 @@ transcode:
 | Type | `int` |
 | Default | `0` (ffmpeg default) |
 | CLI flag | `--decode-threads` |
+| Env var | `SMELT_DECODE_THREADS` |
 
 Caps ffmpeg's decoder thread count. Emitted as a global `-threads N` *before*
 `-i`, so it constrains decode specifically — `extra_args`/`--ffmpeg-arg`
@@ -493,6 +510,7 @@ transcode:
 | Type | `bool` |
 | Default | `false` |
 | CLI flag | `--i-know-this-drops-hdr` |
+| Env var | `SMELT_ALLOW_HDR_LOSS` |
 
 Required to transcode a source carrying a Dolby Vision RPU (detected via
 `ffprobe`'s DOVI configuration record). Without it, matching files are
@@ -555,11 +573,8 @@ profiles:
 Settings are resolved in this order (highest wins):
 
 ```
-CLI flag  >  config.yaml  >  built-in default
+CLI flag  >  environment variable  >  config.yaml  >  built-in default
 ```
-
-There is no environment variable layer today — see the note at the top of
-[Key Reference](#key-reference).
 
 ---
 

@@ -165,9 +165,10 @@ profiles:
     preset: slow
 ```
 
-Every config key can also be set via the equivalent CLI flag, which always
-wins over `config.yaml`. `SMELT_`-prefixed environment variables are not
-currently wired up, despite some older docs claiming otherwise.
+Most config keys can also be set via a `SMELT_`-prefixed environment variable
+or the equivalent CLI flag. Precedence: `CLI flag > env var > config.yaml >
+built-in default` — see [docs/CLI.md](docs/CLI.md#environment-variables) for
+the full flag/env var table.
 
 See [docs/CONFIG.md](docs/CONFIG.md) for the full schema and key reference.
 

@@ -1337,13 +1337,46 @@ is set — see [`smelt do`](#smelt-do)).
 
 ## Environment Variables
 
-`SMELT_`-prefixed environment variables are **not currently wired up** —
-despite being referenced by older docs, no flag or config key can be set this
-way today. Flag precedence is just:
+Every `config.yaml` key documented in [CONFIG.md](CONFIG.md#key-reference) can
+also be set via a flat `SMELT_`-prefixed environment variable. Precedence
+(highest to lowest):
 
 1. CLI flag
-2. `config.yaml` value
-3. Built-in default
+2. Environment variable
+3. `config.yaml` value
+4. Built-in default
 
-See [`internal/config`](../internal/config) / `cmd/root.go`'s `bindTranscodeFlags`
-if you're looking to add real env var support; it isn't there yet.
+| Flag | Env var |
+|---|---|
+| `--workers` | `SMELT_WORKERS` |
+| `--log-level` | `SMELT_LOG_LEVEL` |
+| `--log-format` | `SMELT_LOG_FORMAT` |
+| `--db` | `SMELT_DB` |
+| `--src` | `SMELT_SRC` |
+| `--ext` | `SMELT_EXT` |
+| `--codec` | `SMELT_CODEC` |
+| `--crf` | `SMELT_CRF` |
+| `--preset` | `SMELT_PRESET` |
+| `--hwaccel` | `SMELT_HWACCEL` |
+| `--audio-codec` | `SMELT_AUDIO_CODEC` |
+| `--audio-bitrate` | `SMELT_AUDIO_BITRATE` |
+| `--subs` | `SMELT_SUBS` |
+| `--skip-source-codec` | `SMELT_SKIP_SOURCE_CODEC` |
+| `--inplace` | `SMELT_INPLACE` |
+| `--skip-hardlinked` | `SMELT_SKIP_HARDLINKED` |
+| `--force` | `SMELT_FORCE` |
+| `--to` | `SMELT_TO` |
+| `--output-dir` | `SMELT_OUTPUT_DIR` |
+| `--suffix` | `SMELT_SUFFIX` |
+| `--decode-threads` | `SMELT_DECODE_THREADS` |
+| `--i-know-this-drops-hdr` | `SMELT_ALLOW_HDR_LOSS` |
+
+Flags not in this table (`--config`, `--assume-yes`, `--run-id`, `--profile`,
+`--ffmpeg-arg`, ...) have no env var equivalent — set them on the command line
+or via a wrapper script.
+
+Example:
+
+```bash
+SMELT_WORKERS=16 SMELT_CODEC=av1 smelt transcode --src /mnt/media
+```
