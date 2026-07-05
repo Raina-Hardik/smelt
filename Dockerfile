@@ -19,4 +19,8 @@ ARG TARGETARCH
 # Copy the pre-compiled linux binary matching the architecture
 COPY smelt-linux-${TARGETARCH} /usr/local/bin/smelt
 
+# Documents `smelt serve`'s default port; has no effect unless the run command
+# actually starts the server (`docker run ... smelt serve --addr 0.0.0.0:7700`).
+EXPOSE 7700
+
 ENTRYPOINT ["/usr/local/bin/smelt"]
