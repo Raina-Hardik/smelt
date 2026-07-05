@@ -129,13 +129,14 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
-      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
       --dry-run                         print transcode plan without executing anything
       --ext strings                     file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for transcode
       --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --hwdecode string                 hardware decode: auto|off; auto decodes on the hardware encoder's device when a per-file probe confirms the source is decodable there, else software (a hardware-decode failure retries that file once with software decode); off forces software decode (default "auto")
       --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
       --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --output-dir string               write output files to this directory instead of alongside source
@@ -166,12 +167,13 @@ Global Flags:
 | `--audio-bitrate` | string | _(encoder default)_ | Target audio bitrate when re-encoding, e.g. `192k`. Ignored when `--audio-codec=copy`. |
 | `--codec` | string | `h265` | Target video codec. Valid values: `h264`, `h265`, `av1`, `vp9`. Maps to `libx264`, `libx265`, `libsvtav1`, `libvpx-vp9` respectively. |
 | `--crf` | int | `23` | Constant Rate Factor controlling quality vs. file size. Lower values produce higher quality. Valid range: 0–51. |
-| `--decode-threads` | int | `0` | Caps ffmpeg's decoder thread count. `0` leaves it at ffmpeg's default (usually all available cores). Emitted as a global `-threads N` *before* `-i`, so — unlike `--ffmpeg-arg -threads N` placed after `-i`, which only constrains the encoder — it actually throttles decode. Relevant for large software-decoded sources (e.g. 10-bit 4K HEVC) running alongside a hardware encoder, where decode is the uncapped, thermally expensive half of the pipeline; see the `--hwaccel` note on the resource-profile warning below. |
+| `--decode-threads` | int | `0` | Caps ffmpeg's decoder thread count. `0` leaves it at ffmpeg's default (usually all available cores). Emitted as a global `-threads N` *before* `-i`, so — unlike `--ffmpeg-arg -threads N` placed after `-i`, which only constrains the encoder — it actually throttles decode. Relevant for large software-decoded sources (e.g. 10-bit 4K HEVC) running alongside a hardware encoder, where decode is the uncapped, thermally expensive half of the pipeline; see the `--hwaccel` note on the resource-profile warning below. While hardware decode is active for a file (see `--hwdecode`), `-threads` is pointless and is omitted from the command (a debug line notes it when the flag was set); the cap still applies in full on every software-decode path — `--hwdecode off`, sources the device can't decode, and the automatic software-decode retry. |
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
 | `--ext` | strings | `mkv,mp4,avi` | Comma-separated list of file extensions to match during the directory scan. Case-insensitive. Leading dots optional. |
-| `--ffmpeg-arg` | stringArray | _(none)_ | Raw ffmpeg argument passed through verbatim. Repeatable — one token per flag (e.g. `--ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2`). Profile `extra_args` are prepended before these. |
+| `--ffmpeg-arg` | stringArray | _(none)_ | Raw ffmpeg argument passed through verbatim. Repeatable — one token per flag (e.g. `--ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2`). Profile `extra_args` are prepended before these. Placed *after* `-i` and the encode flags, so it cannot override the pre-input decode arguments smelt emits (`-hwaccel …`, `-threads`); use `--hwdecode off` / `--decode-threads` to control the decode side. |
 | `--force` | bool | `false` | Re-transcode even when a file is already up to date. Without it, re-runs are idempotent: normal runs skip existing outputs (and smelt's own `<suffix>` files); `--inplace` skips files already in the target codec (or in the DB). `--force` disables both. |
-| `--hwaccel` | string | `auto` | Hardware acceleration backend: `auto`, `none`, `nvenc`, `qsv`, `vaapi`, `amf`, `videotoolbox`. `auto` functionally probes for a usable GPU encoder for the target codec and falls back to software; an explicit backend that isn't usable also falls back. The chosen encoder is logged. smelt only ever accelerates *encode* — decode is always software, on every backend — so a resolved hardware backend logs a `resource profile` warning: full-CPU decode is running concurrently with the GPU/QSV/NVENC encode block, the most thermally demanding combination on constrained hardware. That warning fires (and is visible) on `--dry-run` too, before any file is touched, and includes a concrete next step: a suggested `--decode-threads`/`--workers` value on every platform, plus a `systemd-run --scope -p CPUQuota=...` example when `systemd-run` is actually on `$PATH` (smelt makes no assumption about systemd, or about Linux at all — the warning fires on Windows and macOS builds too). |
+| `--hwaccel` | string | `auto` | Hardware acceleration backend: `auto`, `none`, `nvenc`, `qsv`, `vaapi`, `amf`, `videotoolbox`. `auto` functionally probes for a usable GPU encoder for the target codec and falls back to software; an explicit backend that isn't usable also falls back. The chosen encoder is logged. When a hardware encoder resolves on `nvenc`, `qsv`, or `vaapi`, decode also runs on that *same device* for every file a per-file probe confirms is hardware-decodable there (see `--hwdecode`), keeping the whole video pipeline in device memory. Files that aren't hardware-decodable — or all files with `--hwdecode off` — decode in software, and that combination (full-CPU decode concurrent with the GPU/QSV/NVENC encode block, the most thermally demanding split on constrained hardware) logs a `resource profile` warning with a concrete next step: the applicable remedy first (`--hwdecode off` set, or source not hw-decodable on the backend), then a suggested `--decode-threads`/`--workers` value, plus a `systemd-run --scope -p CPUQuota=...` example when `systemd-run` is actually on `$PATH` (smelt makes no assumption about systemd, or about Linux at all — the warning fires on Windows and macOS builds too). The warning fires (and is visible) on `--dry-run` too, before any file is touched. `amf` and `videotoolbox` are encode-only backends: decode is always software there this release. |
+| `--hwdecode` | string | `auto` | Hardware decode mode: `auto` or `off`. `auto` decodes each file on the *same device* as the resolved hardware encoder — never a second GPU, frames never cross a device boundary — when a functional probe against the actual file confirms the device can decode it. The probe result is cached per source shape (codec × profile × pixel format), so a library of identically-shaped files pays for one probe (~1 s). A file whose shape isn't decodable on the device silently decodes in software (normal for e.g. VP9 sources on a device without VP9 decode blocks; debug-logged once per shape). No value ever *forces* hardware decode: `auto` means "when the probe says it works", `off` means never. If ffmpeg exits non-zero while hardware decode is active, the transient output is deleted and the file is retried exactly once with software decode (logged as a warning) before being counted as failed; the cached probe result for that shape is evicted so identical files don't repeat the fail-then-retry cycle. 10-bit sources take the hardware pipeline only when the device can also *encode* 10-bit (`main10`, probed); otherwise the whole file falls back to the software pipeline rather than being silently flattened to 8-bit. Has no effect without a resolved hardware encoder, or on the encode-only `amf`/`videotoolbox` backends. Unknown values are a usage error (exit 2). |
 | `--i-know-this-drops-hdr` | bool | `false` | Required to transcode a source carrying a Dolby Vision RPU (detected via `ffprobe`'s DOVI configuration record). Without it, smelt excludes matching files from the run (counted and logged as `blocked`, distinct from `skipped`) rather than silently re-encoding them and dropping the DV layer — smelt has no DV passthrough. Pass this flag once you've made that call knowingly. Static HDR10/HDR10+ metadata loss on a plain re-encode is a separate, undetected gap — see [Planned / Under Consideration](../README.md#planned--under-consideration). |
 | `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. Files already in the target codec are skipped (probed with `ffprobe`; override with `--force`). The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
@@ -260,13 +262,14 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
-      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
       --dry-run                         print each pass's transcode plan without executing anything
       --ext strings                     file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for watch
       --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --hwdecode string                 hardware decode: auto|off; auto decodes on the hardware encoder's device when a per-file probe confirms the source is decodable there, else software (a hardware-decode failure retries that file once with software decode); off forces software decode (default "auto")
       --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
       --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --interval duration               how often to rescan --src for new or changed files (default 5m0s)
@@ -325,12 +328,13 @@ detect it.
 Launch the interactive bubbletea TUI. Opens instantly with a brief "Scanning…"
 state while the source directory is walked and the transcode plan is built in the
 background. Once the scan completes, the editable pre-flight screen appears where
-you can adjust codec, CRF, preset, hwaccel, workers, decode-thread cap, audio
-codec/bitrate, subtitle mode, and inplace. The concrete encoder resolved from
-`--hwaccel` is shown live, alongside a resource-profile warning when decode
-(always software) and encode (a resolved hardware backend) would run
-concurrently. Press Enter to begin (or, with inplace on, confirm first); jobs
-run in parallel with live progress, worker status, and logs.
+you can adjust codec, CRF, preset, hwaccel, hwdecode, workers, decode-thread
+cap, audio codec/bitrate, subtitle mode, and inplace. The concrete encoder
+resolved from `--hwaccel` is shown live, alongside the decode mode (hardware
+on the same device, or software with the thread cap) and a resource-profile
+warning when software decode and a hardware encode would run concurrently.
+Press Enter to begin (or, with inplace on, confirm first); jobs run in
+parallel with live progress, worker status, and logs.
 
 See [TUI.md](TUI.md) for the full layout and keybindings reference.
 
@@ -346,12 +350,12 @@ smelt tui [flags]
 Launch the interactive transcoding TUI. Opens instantly; scans the source
 directory and builds the transcode plan in the background while showing a
 "Scanning…" state. Once ready, an editable configure screen appears — adjust
-codec, CRF, preset, hwaccel, workers, decode-thread cap, audio codec/bitrate,
-subtitle mode, and inplace, and see the concrete encoder that --hwaccel
-resolves to plus a live decode/encode resource-profile warning. Press enter
-to start (or, with inplace on, confirm first); jobs then run in parallel with
-live progress, worker status, and logs. Press q or Ctrl+C to cancel running
-jobs cleanly and quit.
+codec, CRF, preset, hwaccel, hwdecode, workers, decode-thread cap, audio
+codec/bitrate, subtitle mode, and inplace, and see the concrete encoder that
+--hwaccel resolves to plus a live decode row and resource-profile warning.
+Press enter to start (or, with inplace on, confirm first); jobs then run in
+parallel with live progress, worker status, and logs. Press q or Ctrl+C to
+cancel running jobs cleanly and quit.
 
 Usage:
   smelt tui [flags]
@@ -361,12 +365,13 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
-      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
       --ext strings                     file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for tui
       --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --hwdecode string                 hardware decode: auto|off; auto decodes on the hardware encoder's device when a per-file probe confirms the source is decodable there, else software (a hardware-decode failure retries that file once with software decode); off forces software decode (default "auto")
       --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
       --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --output-dir string               write output files to this directory instead of alongside source
@@ -392,8 +397,10 @@ Global Flags:
 A source with a detected Dolby Vision RPU is excluded from the TUI's plan
 (same `--i-know-this-drops-hdr` gate as `smelt transcode`) and reported in the
 log pane as `blocked N Dolby Vision source(s)`, alongside the existing
-`skipped` count. The resolved encoder panel also reflects the resource-profile
-warning: software decode running alongside a hardware encoder backend.
+`skipped` count. The resolved encoder panel also shows the decode mode
+(hardware on the encoder's device, or software with the thread cap) and the
+resource-profile warning when software decode would run alongside a hardware
+encoder backend.
 
 ---
 
@@ -678,12 +685,13 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
-      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
       --ext strings                     file extensions to match (default [mkv,mp4,avi])
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for workflow
       --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --hwdecode string                 hardware decode: auto|off; auto decodes on the hardware encoder's device when a per-file probe confirms the source is decodable there, else software (a hardware-decode failure retries that file once with software decode); off forces software decode (default "auto")
       --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
       --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --name string                     workflow name, used in the script header and lock file
@@ -710,10 +718,11 @@ Global Flags:
       --run-id string       unique identifier for this run; written to the history DB for dashboard tracking (auto-generated by the server; leave unset for manual CLI use)
 ```
 
-`--decode-threads` and `--i-know-this-drops-hdr` are forwarded into the
-generated script the same way every other `smelt transcode` flag is — see
-[`TranscodeArgs`](../internal/workflow/workflow.go) — so a scheduled workflow
-can carry the same decode-throttling or DV acknowledgement as an ad hoc run.
+`--decode-threads`, `--hwdecode`, and `--i-know-this-drops-hdr` are forwarded
+into the generated script the same way every other `smelt transcode` flag is —
+see [`TranscodeArgs`](../internal/workflow/workflow.go) — so a scheduled
+workflow can carry the same decode-side configuration or DV acknowledgement as
+an ad hoc run (e.g. `--hwdecode off` renders into the script when set).
 
 ---
 
@@ -982,11 +991,12 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
-      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for do
       --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --hwdecode string                 hardware decode: auto|off; auto decodes on the hardware encoder's device when a per-file probe confirms the source is decodable there, else software (a hardware-decode failure retries that file once with software decode); off forces software decode (default "auto")
       --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
       --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --output-dir string               write output files to this directory instead of alongside source
@@ -1357,6 +1367,7 @@ also be set via a flat `SMELT_`-prefixed environment variable. Precedence
 | `--crf` | `SMELT_CRF` |
 | `--preset` | `SMELT_PRESET` |
 | `--hwaccel` | `SMELT_HWACCEL` |
+| `--hwdecode` | `SMELT_HWDECODE` |
 | `--audio-codec` | `SMELT_AUDIO_CODEC` |
 | `--audio-bitrate` | `SMELT_AUDIO_BITRATE` |
 | `--subs` | `SMELT_SUBS` |
