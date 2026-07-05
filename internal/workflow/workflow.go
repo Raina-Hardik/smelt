@@ -114,6 +114,9 @@ func TranscodeArgs(cfg *config.Config) []string {
 	if cfg.DecodeThreads > 0 {
 		args = append(args, flag("--decode-threads", strconv.Itoa(cfg.DecodeThreads)))
 	}
+	if strings.EqualFold(cfg.HWDecode, "off") {
+		args = append(args, flag("--hwdecode", "off"))
+	}
 	if cfg.AllowHDRLoss {
 		args = append(args, "--i-know-this-drops-hdr")
 	}

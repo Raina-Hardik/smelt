@@ -309,3 +309,16 @@ func TestTranscodeArgsExported(t *testing.T) {
 		t.Error("TranscodeArgs missing threaded --db flag (subprocess would fall back to the default DB path)")
 	}
 }
+
+func TestTranscodeArgsForwardsHWDecodeOff(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Src = "/mnt/media"
+
+	if joined := strings.Join(TranscodeArgs(cfg), " "); strings.Contains(joined, "--hwdecode") {
+		t.Errorf("default (auto) must not render --hwdecode: %s", joined)
+	}
+	cfg.HWDecode = "off"
+	if joined := strings.Join(TranscodeArgs(cfg), " "); !strings.Contains(joined, "--hwdecode 'off'") {
+		t.Errorf("hwdecode off must render into the script: %s", joined)
+	}
+}
