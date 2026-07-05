@@ -767,7 +767,7 @@ Usage:
 
 Examples:
   smelt each --src /mnt/media --ext mkv,mp4
-  smelt each --src /mnt/media --ext mkv --run-id "$RUN_ID"
+  smelt each --src /mnt/media --ext mkv --name nightly --run-id "$RUN_ID"
 
 Flags:
       --ext strings    file extensions to match (default [mkv,mp4,avi])
