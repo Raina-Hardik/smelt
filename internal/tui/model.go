@@ -50,6 +50,7 @@ const (
 	fCRF
 	fPreset
 	fHWAccel
+	fHWDecode
 	fWorkers
 	fDecodeThreads
 	fAudioCodec
@@ -62,6 +63,7 @@ const (
 var (
 	codecChoices        = []string{"h264", "h265", "av1", "vp9"}
 	hwaccelChoices      = []string{"auto", "none", "nvenc", "qsv", "vaapi", "amf", "videotoolbox"}
+	hwdecodeChoices     = []string{"auto", "off"}
 	audioCodecChoices   = ffmpeg.KnownAudioCodecs()
 	audioBitrateChoices = []string{"", "96k", "128k", "192k", "256k", "320k"}
 	subsChoices         = []string{"copy", "drop"}
@@ -422,6 +424,10 @@ func (m Model) adjust(delta int) (tea.Model, tea.Cmd) {
 	case fHWAccel:
 		m.cfg.HWAccel = cycle(hwaccelChoices, m.cfg.HWAccel, delta)
 		reResolve = true
+	case fHWDecode:
+		// No re-probe needed: decode probes are per-file at dispatch time and
+		// keyed by backend, so the toggle only changes what the run will try.
+		m.cfg.HWDecode = cycle(hwdecodeChoices, m.cfg.HWDecode, delta)
 	case fWorkers:
 		m.cfg.Workers = clamp(m.cfg.Workers+delta, 1, 256)
 	case fDecodeThreads:
@@ -761,6 +767,7 @@ func (m Model) preflightView() string {
 	b.WriteString(edit(fCRF, "crf", strconv.Itoa(m.cfg.CRF), "") + "\n")
 	b.WriteString(edit(fPreset, "preset", preset, "") + "\n")
 	b.WriteString(edit(fHWAccel, "hwaccel", m.cfg.HWAccel, "  → "+m.resolvedEncoder()) + "\n")
+	b.WriteString(edit(fHWDecode, "hwdecode", m.cfg.HWDecode, "") + "\n")
 	b.WriteString(edit(fWorkers, "workers", strconv.Itoa(m.cfg.Workers), "") + "\n")
 	b.WriteString(edit(fDecodeThreads, "decode", decodeThreads, "") + "\n")
 	if line := m.resourceProfileLine(); line != "" {
@@ -812,10 +819,13 @@ func (m Model) resourceProfileLine() string {
 	}
 	p := worker.BuildResourceProfile(m.encoder, m.backend, m.cfg.DecodeThreads, m.cfg.HWDecode)
 	label := fmt.Sprintf("  decode: %s", p.DecodeLabel())
+	if p.DecodeHW {
+		return theme.StatusDone.Render(label)
+	}
 	if !p.Warn {
 		return theme.StatusPend.Render(label)
 	}
-	return theme.StatusErr.Render(label + "  ⚠ concurrent with hardware encode — see --decode-threads/--workers")
+	return theme.StatusErr.Render(label + "  ⚠ concurrent with hardware encode — see --hwdecode/--decode-threads/--workers")
 }
 
 // outputSummary describes where finished files will land.

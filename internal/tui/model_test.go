@@ -483,3 +483,20 @@ func TestPreflightAndConfirmViewsRenderWithoutPanic(t *testing.T) {
 	m.confirming = true
 	_ = m.View()
 }
+
+func TestAdjustHWDecodeToggles(t *testing.T) {
+	m := newTestModel(t, "/x/a.mkv")
+	m.field = fHWDecode
+	m.cfg.HWDecode = "auto"
+	out, cmd := m.adjust(+1)
+	if got := out.(Model).cfg.HWDecode; got != "off" {
+		t.Errorf("hwdecode after +1 = %q, want off", got)
+	}
+	if cmd != nil {
+		t.Error("hwdecode toggle must not re-probe (decode probes are per-file at dispatch)")
+	}
+	out, _ = out.(Model).adjust(+1)
+	if got := out.(Model).cfg.HWDecode; got != "auto" {
+		t.Errorf("hwdecode wraps to %q, want auto", got)
+	}
+}
