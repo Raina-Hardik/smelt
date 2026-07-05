@@ -183,9 +183,12 @@ For example, the surgical DV/HDR design lives on `ideas/surgical-mode`
 
 ## Adding a New Transcode Profile
 
-Profiles live in `config.yaml` under the `profiles` key. To add a new built-in
-profile (available without user config), you also register it as a named
-constant in the codebase.
+Profiles are pure `config.yaml` entries under the `profiles` key — there is no
+code-side registration step. `Config.Validate()` in `internal/config/config.go`
+already rejects an unrecognized `--profile` name (`unknown profile %q`) by
+checking `viper.IsSet("profiles.<name>")` against whatever the user's
+`config.yaml` defines, so there's no built-in/named-constant profile list to
+extend.
 
 ### Step 1 — Define in config.yaml.example
 
@@ -198,21 +201,16 @@ profiles:
     extra_args: ["-vf", "scale=1920:-2"]
 ```
 
-### Step 2 — Register in `internal/ffmpeg/runner.go`
-
-Add the profile name to any validation logic (when implemented) so that smelt
-can give a useful error if an unknown profile is requested.
-
-### Step 3 — Document in CONFIG.md
+### Step 2 — Document in CONFIG.md
 
 Add a row to the profiles table in [CONFIG.md](CONFIG.md) describing the
 profile's intended use case and the codec/CRF/preset it configures.
 
-### Step 4 — Add a test
+### Step 3 — Add a test
 
-Add a test in `internal/worker/pool_test.go` (or a dedicated
-`profiles_test.go`) verifying that the profile is applied correctly to the
-ffmpeg argument list.
+Add a case to `internal/config/config_test.go` verifying that
+`transcode.profile` applies the profile's fields and that explicit flags still
+override them (see the existing `TestProfile*` cases in that file).
 
 ---
 
