@@ -90,7 +90,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 
 	if cfg.DryRun {
 		enc, backend := ffmpeg.ResolveEncoder(cmd.Context(), cfg.Codec, cfg.HWAccel)
-		worker.LogResourceProfile(enc, backend, cfg.DecodeThreads)
+		worker.LogResourceProfile(enc, backend, cfg.DecodeThreads, cfg.HWDecode)
 		for _, f := range files {
 			log.Info().
 				Str("src", f.Path).

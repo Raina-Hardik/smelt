@@ -15,12 +15,19 @@ import (
 
 func p(s string) string { return filepath.FromSlash(s) }
 
-func TestResourceProfileWarnsOnlyForHardwareBackend(t *testing.T) {
-	if got := BuildResourceProfile("libx265", "", 0); got.Warn {
+func TestResourceProfileWarnsOnlyForSoftwareDecodeWithHardwareEncode(t *testing.T) {
+	if got := BuildResourceProfile("libx265", "", 0, "auto"); got.Warn {
 		t.Error("software backend should not warn")
 	}
-	if got := BuildResourceProfile("hevc_nvenc", "nvenc", 0); !got.Warn {
-		t.Error("hardware backend should warn (software decode + hardware encode)")
+	if got := BuildResourceProfile("hevc_nvenc", "nvenc", 0, "off"); !got.Warn {
+		t.Error("hwdecode off + hardware encode should warn (software decode concurrent with hw encode)")
+	}
+	full := BuildResourceProfile("hevc_nvenc", "nvenc", 0, "auto")
+	if full.Warn || !full.DecodeHW {
+		t.Errorf("hwdecode auto on nvenc = %+v, want DecodeHW=true and no warning (full hardware pipeline)", full)
+	}
+	if got := BuildResourceProfile("hevc_amf", "amf", 0, "auto"); !got.Warn || got.DecodeHW {
+		t.Errorf("amf is encode-only: got %+v, want software decode + warning", got)
 	}
 }
 
@@ -34,7 +41,7 @@ func TestResourceProfileDecodeLabel(t *testing.T) {
 		{4, "software (capped at 4 threads)"},
 	}
 	for _, c := range cases {
-		got := BuildResourceProfile("libx265", "", c.threads).DecodeLabel()
+		got := BuildResourceProfile("libx265", "", c.threads, "auto").DecodeLabel()
 		if got != c.want {
 			t.Errorf("DecodeLabel(%d) = %q, want %q", c.threads, got, c.want)
 		}
@@ -47,8 +54,8 @@ func TestResourceProfileGovernorHint(t *testing.T) {
 
 	t.Run("without systemd-run", func(t *testing.T) {
 		lookPath = func(string) (string, error) { return "", errors.New("not found") }
-		got := BuildResourceProfile("hevc_nvenc", "nvenc", 4).GovernorHint()
-		want := "lower --decode-threads (try 4) and/or --workers"
+		got := BuildResourceProfile("hevc_nvenc", "nvenc", 4, "off").GovernorHint()
+		want := "remove --hwdecode off; or lower --decode-threads (try 4) and/or --workers"
 		if got != want {
 			t.Errorf("GovernorHint() = %q, want %q", got, want)
 		}
@@ -62,8 +69,8 @@ func TestResourceProfileGovernorHint(t *testing.T) {
 			t.Skip("systemd-run branch only applies on linux")
 		}
 		lookPath = func(string) (string, error) { return "/usr/bin/systemd-run", nil }
-		got := BuildResourceProfile("hevc_nvenc", "nvenc", 0).GovernorHint()
-		want := "lower --decode-threads (try 2) and/or --workers; or wrap the run: systemd-run --scope -p CPUQuota=50% --nice=10 smelt transcode --decode-threads 2 --workers 1 ..."
+		got := BuildResourceProfile("hevc_nvenc", "nvenc", 0, "off").GovernorHint()
+		want := "remove --hwdecode off; or lower --decode-threads (try 2) and/or --workers; or wrap the run: systemd-run --scope -p CPUQuota=50% --nice=10 smelt transcode --decode-threads 2 --workers 1 ..."
 		if got != want {
 			t.Errorf("GovernorHint() = %q, want %q", got, want)
 		}

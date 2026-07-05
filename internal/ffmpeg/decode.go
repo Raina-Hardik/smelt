@@ -45,6 +45,14 @@ func hwDecodeArgs(backend string) []string {
 	return nil
 }
 
+// HWDecodeCapable reports whether backend has a hardware decode path this
+// release (AMF and VideoToolbox are encode-only).
+func HWDecodeCapable(backend string) bool { return hwDecodeArgs(backend) != nil }
+
+// SoftwareEncoder returns the software encoder for a codec alias (e.g. h265 →
+// libx265), for callers routing a single file back to the software pipeline.
+func SoftwareEncoder(codec string) string { return codecFlag(codec) }
+
 // ProbeDecode reports whether backend can hardware-decode src on the same
 // device the encoder uses, by actually decoding a few frames of the real file
 // (compiled-in hwaccels still fail at runtime without the right decode

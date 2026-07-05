@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,15 @@ import (
 // GovernorHint without depending on what's actually installed on the runner.
 var lookPath = exec.LookPath
 
+// ffmpeg entry points, indirected so the per-file decode decision and the
+// retry-once path are testable without spawning ffmpeg/ffprobe.
+var (
+	ffmpegRun         = ffmpeg.Run
+	probeAttrs        = ffmpeg.ProbeAttrs
+	probeDecode       = ffmpeg.ProbeDecode
+	probeEncoder10Bit = ffmpeg.ProbeEncoder10Bit
+)
+
 type Pool struct {
 	cfg         *config.Config
 	db          *db.DB // nil when DB is disabled
@@ -32,6 +42,9 @@ type Pool struct {
 	resolveOnce sync.Once
 	encoder     string // resolved once per run via resolveEncoder
 	backend     string
+
+	tenBitWarn       sync.Once // once-per-run WARN when main10 encode is unavailable
+	decodeMissLogged sync.Map  // shape → struct{}; debug-log the first decode-probe miss per shape
 }
 
 func New(cfg *config.Config, database *db.DB) *Pool {
@@ -69,27 +82,38 @@ func (p *Pool) Resolve(ctx context.Context) (encoder, backend string) {
 }
 
 // ResourceProfile describes the decode/encode split for a resolved encoder
-// choice, independent of how it's displayed (CLI log line, TUI row). smelt
-// only ever accelerates the encode side — decode is always software,
-// regardless of backend — so Warn is true whenever software decode would run
-// concurrently with a hardware encode block, the most thermally demanding
-// combination. Shared by the CLI (LogResourceProfile) and the TUI's
-// pre-flight screen so both surfaces agree on what "capped" means.
+// choice, independent of how it's displayed (CLI log line, TUI row). With a
+// hardware encoder on a decode-capable backend and hwdecode=auto, decode runs
+// on the same device per file (DecodeHW); otherwise decode is software, and
+// Warn is true whenever that software decode would run concurrently with a
+// hardware encode block — the most thermally demanding combination. Shared by
+// the CLI (LogResourceProfile) and the TUI's pre-flight screen so both
+// surfaces agree.
 type ResourceProfile struct {
 	Encoder       string
 	Backend       string // "" = software encode
 	DecodeThreads int    // 0 = uncapped (ffmpeg default)
+	HWDecode      string // resolved --hwdecode mode (auto|off)
+	DecodeHW      bool   // hardware decode will be attempted per file
 	Warn          bool
 }
 
 // BuildResourceProfile resolves the profile for a given encoder/backend/cap.
-func BuildResourceProfile(encoder, backend string, decodeThreads int) ResourceProfile {
-	return ResourceProfile{Encoder: encoder, Backend: backend, DecodeThreads: decodeThreads, Warn: backend != ""}
+func BuildResourceProfile(encoder, backend string, decodeThreads int, hwdecode string) ResourceProfile {
+	r := ResourceProfile{Encoder: encoder, Backend: backend, DecodeThreads: decodeThreads, HWDecode: hwdecode}
+	r.DecodeHW = backend != "" && !strings.EqualFold(hwdecode, "off") && ffmpeg.HWDecodeCapable(backend)
+	r.Warn = backend != "" && !r.DecodeHW
+	return r
 }
 
-// DecodeLabel is a short human-readable summary of the decode-side cap, e.g.
-// "software (capped at 4 threads)" or "software (uncapped)".
+// DecodeLabel is a short human-readable summary of the decode side, e.g.
+// "hw: vaapi (per-file, may fall back)", "software (capped at 4 threads)" or
+// "software (uncapped)". The hardware wording stays honest: probes run per
+// file at dispatch time, so individual files may still decode in software.
 func (r ResourceProfile) DecodeLabel() string {
+	if r.DecodeHW {
+		return fmt.Sprintf("hw: %s (per-file, may fall back)", r.Backend)
+	}
 	if r.DecodeThreads > 0 {
 		s := "thread"
 		if r.DecodeThreads != 1 {
@@ -118,6 +142,16 @@ func (r ResourceProfile) GovernorHint() string {
 			hint += fmt.Sprintf("; or wrap the run: systemd-run --scope -p CPUQuota=50%% --nice=10 smelt transcode --decode-threads %d --workers 1 ...", threads)
 		}
 	}
+	// Lead with the applicable hardware-decode remedy: the whole warning
+	// disappears if decode moves onto the encoder's device.
+	if r.Backend != "" {
+		switch {
+		case strings.EqualFold(r.HWDecode, "off"):
+			hint = "remove --hwdecode off; or " + hint
+		case !ffmpeg.HWDecodeCapable(r.Backend):
+			hint = fmt.Sprintf("hardware decode is not supported on %s this release; ", r.Backend) + hint
+		}
+	}
 	return hint
 }
 
@@ -125,8 +159,12 @@ func (r ResourceProfile) GovernorHint() string {
 // choice. Nothing here caps the combined load when Warn is true; the warning
 // exists so it's visible before ffmpeg starts, not discovered via a thermal
 // shutdown. Call once per run, including on the --dry-run path.
-func LogResourceProfile(encoder, backend string, decodeThreads int) {
-	r := BuildResourceProfile(encoder, backend, decodeThreads)
+func LogResourceProfile(encoder, backend string, decodeThreads int, hwdecode string) {
+	r := BuildResourceProfile(encoder, backend, decodeThreads, hwdecode)
+	if r.DecodeHW {
+		log.Info().Str("decode", r.DecodeLabel()).Str("encode", backend).Str("encoder", encoder).Msgf("full hardware pipeline: %s", backend)
+		return
+	}
 	if !r.Warn {
 		log.Info().Str("decode", r.DecodeLabel()).Str("encode", "software").Msg("resource profile")
 		return
@@ -151,7 +189,7 @@ func (p *Pool) Run(ctx context.Context, files []scanner.MediaFile) error {
 		Str("encoder", enc).
 		Str("backend", backend).
 		Msg("encoder selected")
-	LogResourceProfile(enc, backend, p.cfg.DecodeThreads)
+	LogResourceProfile(enc, backend, p.cfg.DecodeThreads, p.cfg.HWDecode)
 
 	var failed atomic.Int64
 
@@ -296,9 +334,27 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		Encoder:       p.encoder,
 		Backend:       p.backend,
 	}
+	attrs := p.decideDecode(ctx, f.Path, &spec)
 
 	start := time.Now()
-	if err = ffmpeg.Run(ctx, f.Path, tmp, spec, onProgress); err != nil {
+	err = ffmpegRun(ctx, f.Path, tmp, spec, onProgress)
+	if err != nil && spec.DecodeBackend != "" && ctx.Err() == nil {
+		// Retry exactly once with software decode. No stderr classification —
+		// one wasted attempt on a genuine encode failure is an acceptable cost
+		// for not parsing ffmpeg output heuristically. The probe cache entry is
+		// evicted so identical files re-probe instead of repeating this cycle.
+		if _, isExec := err.(*ffmpeg.ExecError); isExec {
+			_ = os.Remove(tmp)
+			ffmpeg.EvictDecodeCache(spec.DecodeBackend, attrs)
+			log.Warn().Err(err).Str("file", f.Path).Msg("hw decode failed, retrying with software decode")
+			if spec.Backend == "nvenc" {
+				log.Info().Msg("hint: consumer GeForce caps concurrent NVDEC/NVENC sessions; if retries recur at scale, lower --workers")
+			}
+			spec.DecodeBackend = ""
+			err = ffmpegRun(ctx, f.Path, tmp, spec, onProgress)
+		}
+	}
+	if err != nil {
 		p.record(f, dst, spec, time.Since(start), err)
 		return err
 	}
@@ -316,6 +372,74 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	}
 	p.record(f, dst, spec, time.Since(start), nil)
 	return nil
+}
+
+// decideDecode settles the per-file video pipeline on spec: bit-depth routing
+// (shapes the device can't encode faithfully take the full software pipeline)
+// and the hardware-decode decision. Runs after the plan's skip decision, so
+// skipped files never pay a probe. Returns the file's attrs so a runtime
+// failure can evict the decode-probe cache entry. Any probe failure leaves
+// spec untouched — software decode + the resolved encoder, exactly v0.20.0
+// behavior.
+func (p *Pool) decideDecode(ctx context.Context, path string, spec *ffmpeg.EncodeSpec) *ffmpeg.FileAttrs {
+	if p.backend == "" {
+		return nil
+	}
+	attrs, err := probeAttrs(ctx, path)
+	if err != nil || attrs.PixFmt == "" {
+		return nil
+	}
+	depth := ffmpeg.HWPipelineBitDepth(attrs.PixFmt)
+	if depth == 0 {
+		// 12-bit / 4:2:2 / 4:4:4 / exotic: the hardware pipeline's nv12/p010
+		// surfaces would destroy chroma or depth — full software pipeline.
+		p.softwarePipeline(spec)
+		log.Info().Str("file", path).Str("pix_fmt", attrs.PixFmt).Msg("source shape unsupported by the hardware pipeline; using the software pipeline")
+		return attrs
+	}
+	if depth == 10 {
+		if !probeEncoder10Bit(ctx, p.encoder, p.backend) {
+			p.tenBitWarn.Do(func() {
+				log.Warn().Str("encoder", p.encoder).Msg("device cannot encode 10-bit (main10): 10-bit files take the full software pipeline instead of being silently flattened to 8-bit")
+			})
+			log.Info().Str("file", path).Msg("10-bit source without main10 encode: software pipeline")
+			p.softwarePipeline(spec)
+			return attrs
+		}
+		spec.SourceBitDepth = 10
+	} else {
+		spec.SourceBitDepth = 8
+	}
+	if strings.EqualFold(p.cfg.HWDecode, "off") {
+		return attrs
+	}
+	if probeDecode(ctx, p.backend, path, attrs) {
+		spec.DecodeBackend = p.backend
+		if p.cfg.DecodeThreads > 0 {
+			log.Debug().Str("file", path).Msg("--decode-threads omitted while hardware decode is active")
+		}
+	} else {
+		shape := attrs.VideoCodec + "/" + attrs.Profile + "/" + attrs.PixFmt
+		if _, seen := p.decodeMissLogged.LoadOrStore(shape, struct{}{}); !seen {
+			log.Debug().Str("shape", shape).Str("backend", p.backend).Msg("source shape not hw-decodable on this device; software decode")
+		}
+	}
+	return attrs
+}
+
+// softwarePipeline routes one file through the full software pipeline
+// (software decode + software encode) without touching the run-level
+// resolution other files use.
+func (p *Pool) softwarePipeline(spec *ffmpeg.EncodeSpec) {
+	spec.Encoder = ffmpeg.SoftwareEncoder(spec.Codec)
+	spec.Backend = ""
+	spec.DecodeBackend = ""
+	spec.SourceBitDepth = 0
+	// A preset chosen for the hardware encoder's namespace (e.g. nvenc p5)
+	// would be rejected by the software encoder; snap to its default then.
+	if !slices.Contains(ffmpeg.PresetsFor("", spec.Encoder), spec.Preset) {
+		spec.Preset = ffmpeg.DefaultPreset("", spec.Encoder)
+	}
 }
 
 // record persists a transcode outcome to the history DB (no-op when DB is nil).

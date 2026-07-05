@@ -151,7 +151,7 @@ func watchPass(ctx context.Context, cfg *config.Config, pool *worker.Pool, datab
 
 	if dryRun {
 		enc, backend := ffmpeg.ResolveEncoder(ctx, cfg.Codec, cfg.HWAccel)
-		worker.LogResourceProfile(enc, backend, cfg.DecodeThreads)
+		worker.LogResourceProfile(enc, backend, cfg.DecodeThreads, cfg.HWDecode)
 		for _, f := range todo {
 			log.Info().Str("src", f.Path).Str("dst", worker.OutputPath(f, cfg)).Msg("plan")
 		}

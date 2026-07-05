@@ -810,7 +810,7 @@ func (m Model) resourceProfileLine() string {
 	if !m.resolved {
 		return ""
 	}
-	p := worker.BuildResourceProfile(m.encoder, m.backend, m.cfg.DecodeThreads)
+	p := worker.BuildResourceProfile(m.encoder, m.backend, m.cfg.DecodeThreads, m.cfg.HWDecode)
 	label := fmt.Sprintf("  decode: %s", p.DecodeLabel())
 	if !p.Warn {
 		return theme.StatusPend.Render(label)
