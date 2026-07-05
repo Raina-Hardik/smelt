@@ -218,12 +218,30 @@ const probeTimeout = 8 * time.Second
 // probeEncoder reports (and caches) whether enc can actually encode here, by
 // running a tiny real encode. Compiled-in encoders still fail at runtime without
 // the matching hardware, so listing `ffmpeg -encoders` is not enough.
-//
-// The mutex is held only for cache access, not during the ffmpeg call, so
-// concurrent probes for different encoders run in parallel.
 func probeEncoder(ctx context.Context, enc, backend string) bool {
+	return probeEncodeDepth(ctx, enc, backend, 8)
+}
+
+// ProbeEncoder10Bit reports (and caches, key "<enc>:main10") whether enc can
+// encode 10-bit on this device, probed with a p010 lavfi source plus the
+// encoder family's 10-bit profile flag. Gates the hardware pipeline for
+// 10-bit sources: a device that decodes main10 but can't encode it must not
+// silently flatten the file to 8-bit — the worker routes such files through
+// the full software pipeline instead.
+func ProbeEncoder10Bit(ctx context.Context, enc, backend string) bool {
+	return probeEncodeDepth(ctx, enc, backend, 10)
+}
+
+// probeEncodeDepth is the shared probe body. The mutex is held only for cache
+// access, not during the ffmpeg call, so concurrent probes for different
+// encoders run in parallel.
+func probeEncodeDepth(ctx context.Context, enc, backend string, bitDepth int) bool {
+	key := enc
+	if bitDepth == 10 {
+		key = enc + ":main10"
+	}
 	probeMu.Lock()
-	if v, ok := probeCache[enc]; ok {
+	if v, ok := probeCache[key]; ok {
 		probeMu.Unlock()
 		return v
 	}
@@ -242,10 +260,21 @@ func probeEncoder(ctx context.Context, enc, backend string) bool {
 		args = append(args, "-init_hw_device", "qsv=qsv:hw_any")
 	}
 	args = append(args, "-f", "lavfi", "-i", "testsrc=s=320x240:d=1")
-	if backend == "vaapi" {
+	// QSV/NVENC take 10-bit system-memory frames directly; only VAAPI needs
+	// the explicit upload (both shapes validated on real hardware).
+	switch {
+	case backend == "vaapi" && bitDepth == 10:
+		args = append(args, "-vf", "format=p010,hwupload")
+	case backend == "vaapi":
 		args = append(args, "-vf", "format=nv12,hwupload")
+	case bitDepth == 10:
+		args = append(args, "-vf", "format=p010")
 	}
-	args = append(args, "-c:v", enc, "-frames:v", "2", "-f", "null", "-")
+	args = append(args, "-c:v", enc)
+	if bitDepth == 10 {
+		args = append(args, tenBitProfileArgs(enc)...)
+	}
+	args = append(args, "-frames:v", "2", "-f", "null", "-")
 
 	ok := exec.CommandContext(probeCtx, "ffmpeg", args...).Run() == nil
 
@@ -259,7 +288,7 @@ func probeEncoder(ctx context.Context, enc, backend string) bool {
 	// won) is not evidence of absence either — skip those regardless.
 	if ok && ctx.Err() == nil {
 		probeMu.Lock()
-		probeCache[enc] = true
+		probeCache[key] = true
 		probeMu.Unlock()
 	}
 	return ok
