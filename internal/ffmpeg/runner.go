@@ -689,27 +689,32 @@ func ProbeAttrs(ctx context.Context, path string) (*FileAttrs, error) {
 	return parseAttrs(string(out)), nil
 }
 
+// parseAttrs consumes ffprobe's default-format output. ffprobe prints a
+// stream's codec_name and profile *before* its codec_type line, so those two
+// are buffered per stream and committed once the type is known; the fields
+// printed after codec_type (pix_fmt, width, height) key off it directly.
 func parseAttrs(out string) *FileAttrs {
 	a := &FileAttrs{}
-	var lastType string
+	var lastType, pendingName, pendingProfile string
 	for _, line := range strings.Split(out, "\n") {
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
 		switch k {
+		case "codec_name":
+			pendingName = v
+		case "profile":
+			pendingProfile = v
 		case "codec_type":
 			lastType = v
-		case "codec_name":
-			if lastType == "video" && a.VideoCodec == "" {
-				a.VideoCodec = v
-			} else if lastType == "audio" && a.AudioCodec == "" {
-				a.AudioCodec = v
+			if v == "video" && a.VideoCodec == "" {
+				a.VideoCodec = pendingName
+				a.Profile = pendingProfile
+			} else if v == "audio" && a.AudioCodec == "" {
+				a.AudioCodec = pendingName
 			}
-		case "profile":
-			if lastType == "video" && a.Profile == "" {
-				a.Profile = v
-			}
+			pendingName, pendingProfile = "", ""
 		case "pix_fmt":
 			if lastType == "video" && a.PixFmt == "" {
 				a.PixFmt = v

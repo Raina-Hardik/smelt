@@ -44,18 +44,19 @@ func TestHWPipelineBitDepth(t *testing.T) {
 }
 
 func TestParseAttrs(t *testing.T) {
-	// Canned ffprobe -of default=noprint_wrappers=1 output: video stream with
-	// profile+pix_fmt, then an audio stream whose profile must not clobber the
-	// video's, then format-level entries.
-	out := `codec_type=video
-codec_name=hevc
+	// Canned ffprobe -of default=noprint_wrappers=1 output in ffprobe's real
+	// field order: codec_name and profile print *before* codec_type within
+	// each stream (verified against ffmpeg n8.1.2). The audio stream's
+	// codec_name/profile must not clobber the video stream's.
+	out := `codec_name=hevc
 profile=Main 10
-pix_fmt=yuv420p10le
+codec_type=video
 width=3840
 height=2160
-codec_type=audio
+pix_fmt=yuv420p10le
 codec_name=aac
 profile=LC
+codec_type=audio
 duration=4242.5
 bit_rate=15000000
 `
