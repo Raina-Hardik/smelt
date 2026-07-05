@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -265,6 +266,9 @@ func parseRuleLine(line string) (Rule, error) {
 			if len(fields) != 3 {
 				return Rule{}, fmt.Errorf("condition %q: want 'field op value'", part)
 			}
+			if err := validateFieldOp(fields[0], fields[1]); err != nil {
+				return Rule{}, fmt.Errorf("condition %q: %w", part, err)
+			}
 			r.When = append(r.When, Cond{Field: fields[0], Op: fields[1], Value: fields[2]})
 		}
 		line = "do " + rest[doIdx+4:]
@@ -298,26 +302,57 @@ func renderMatchArgs(conds []Cond) string {
 	return b.String()
 }
 
-// condToFlag maps a (field, op) pair to the corresponding smelt match flag.
-func condToFlag(field, op string) string {
-	switch field {
-	case "codec":
-		if op == "ne" {
-			return "--codec-ne"
+// validFieldOps enumerates the field/operator combinations smelt match
+// actually registers flags for (see docs/WORKFLOW.md). condToFlag builds
+// "--<field>-<op>" blindly, so an unlisted combo parses fine here but fails
+// at script-run time with "unknown flag" — reject it up front instead.
+var validFieldOps = map[string]map[string]bool{
+	"codec":    {"eq": true, "ne": true},
+	"audio":    {"eq": true, "ne": true},
+	"ext":      {"eq": true, "ne": true},
+	"height":   {"gt": true, "lt": true, "ge": true, "le": true},
+	"width":    {"gt": true, "lt": true},
+	"bitrate":  {"gt": true, "lt": true},
+	"duration": {"gt": true, "lt": true},
+}
+
+// ValidateRule rejects a Rule containing any field/operator combination
+// smelt match has no flag for. Callers that build Rules outside parseRuleLine
+// (e.g. the server API, which decodes Rules straight from JSON) must call
+// this explicitly — parseRuleLine is the only path that validates otherwise.
+func ValidateRule(r Rule) error {
+	for _, c := range r.When {
+		if err := validateFieldOp(c.Field, c.Op); err != nil {
+			return fmt.Errorf("condition %q: %w", c.Field+" "+c.Op+" "+c.Value, err)
 		}
-		return "--codec-eq"
-	case "audio":
-		if op == "ne" {
-			return "--audio-ne"
-		}
-		return "--audio-eq"
-	case "ext":
-		if op == "ne" {
-			return "--ext-ne"
-		}
-		return "--ext-eq"
-	case "height", "width", "bitrate", "duration":
-		return "--" + field + "-" + op
 	}
-	return ""
+	return nil
+}
+
+// validateFieldOp rejects field/operator combinations smelt match has no
+// flag for, so an invalid --rule fails at `smelt workflow` render time
+// instead of producing a script that errors at run time.
+func validateFieldOp(field, op string) error {
+	ops, known := validFieldOps[field]
+	if !known {
+		return fmt.Errorf("unknown field %q", field)
+	}
+	if !ops[op] {
+		valid := make([]string, 0, len(ops))
+		for o := range ops {
+			valid = append(valid, o)
+		}
+		sort.Strings(valid)
+		return fmt.Errorf("operator %q not valid for field %q (valid: %s)", op, field, strings.Join(valid, ", "))
+	}
+	return nil
+}
+
+// condToFlag maps a (field, op) pair to the corresponding smelt match flag.
+// Callers must have already validated the combination with validateFieldOp.
+func condToFlag(field, op string) string {
+	if !validFieldOps[field][op] {
+		return ""
+	}
+	return "--" + field + "-" + op
 }

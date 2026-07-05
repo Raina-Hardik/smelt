@@ -132,6 +132,12 @@ func (s *Server) handleCreateProgram(w http.ResponseWriter, r *http.Request) {
 	if len(inp.Ext) == 0 {
 		inp.Ext = []string{"mkv", "mp4", "avi"}
 	}
+	for _, rule := range inp.Rules {
+		if err := workflow.ValidateRule(rule); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
+			return
+		}
+	}
 
 	rulesJSON, err := marshalRules(inp.Rules)
 	if err != nil {
@@ -206,6 +212,12 @@ func (s *Server) handleUpdateProgram(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(inp.Ext) == 0 {
 		inp.Ext = []string{"mkv", "mp4", "avi"}
+	}
+	for _, rule := range inp.Rules {
+		if err := workflow.ValidateRule(rule); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
+			return
+		}
 	}
 
 	rulesJSON, err := marshalRules(inp.Rules)

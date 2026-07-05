@@ -237,14 +237,35 @@ func TestParseRuleValid(t *testing.T) {
 
 func TestParseRuleInvalid(t *testing.T) {
 	bad := []string{
-		"when codec ne do transcode",   // condition missing value
-		"when codec ne hevc transcode", // missing 'do'
-		"",                             // empty
-		"do",                           // missing action
+		"when codec ne do transcode",         // condition missing value
+		"when codec ne hevc transcode",       // missing 'do'
+		"",                                   // empty
+		"do",                                 // missing action
+		"when width le 1920 do transcode",    // le not valid for width
+		"when height eq 1080 do transcode",   // eq not valid for height
+		"when codec gt hevc do transcode",    // gt not valid for codec
+		"when nosuchfield eq 1 do transcode", // unknown field
 	}
 	for _, line := range bad {
 		if _, err := ParseRule(line); err == nil {
 			t.Errorf("ParseRule(%q) should have errored", line)
+		}
+	}
+}
+
+func TestValidateFieldOp(t *testing.T) {
+	valid := []struct{ field, op string }{
+		{"codec", "eq"}, {"codec", "ne"},
+		{"audio", "eq"}, {"audio", "ne"},
+		{"ext", "eq"}, {"ext", "ne"},
+		{"height", "gt"}, {"height", "lt"}, {"height", "ge"}, {"height", "le"},
+		{"width", "gt"}, {"width", "lt"},
+		{"bitrate", "gt"}, {"bitrate", "lt"},
+		{"duration", "gt"}, {"duration", "lt"},
+	}
+	for _, c := range valid {
+		if err := validateFieldOp(c.field, c.op); err != nil {
+			t.Errorf("validateFieldOp(%q, %q) = %v, want nil", c.field, c.op, err)
 		}
 	}
 }

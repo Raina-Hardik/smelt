@@ -358,4 +358,8 @@ against `internal/db`'s `programs` table — `workflow.Rule`/`Cond`/`Action`
 carry `json` tags matching the wire format documented in `docs/CLI.md`'s API
 reference (`when`/`do`/`field`/`op`/`value`/`cmd`/`args`), so a program
 fetched from the API round-trips through the same JSON shape it was created
-with.
+with. `POST`/`PUT` run each rule's conditions through `workflow.ValidateRule`
+and reject any field/operator combination `smelt match` has no flag for with
+`400` — the same check `smelt workflow --rule` applies at render time (see
+`docs/WORKFLOW.md`'s operator compatibility table), so an invalid rule can't
+reach the database via either path.

@@ -225,6 +225,20 @@ func TestHandleCreateProgram_WithRules(t *testing.T) {
 	}
 }
 
+func TestHandleCreateProgram_InvalidRuleFieldOp(t *testing.T) {
+	e := newTestEnv(t)
+	w := e.do(http.MethodPost, "/api/programs", map[string]any{
+		"src": "/x",
+		"rules": []map[string]any{
+			{"when": []map[string]any{{"field": "width", "op": "le", "value": "1920"}},
+				"do": map[string]any{"cmd": "transcode"}},
+		},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d; body=%s, want 400 for invalid field/op combo", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleCreateProgram_EmptyRules(t *testing.T) {
 	e := newTestEnv(t)
 	w := e.do(http.MethodPost, "/api/programs", map[string]any{
@@ -310,6 +324,22 @@ func TestHandleUpdateProgram_Valid(t *testing.T) {
 	}
 	if resp.Name != "updated" {
 		t.Errorf("Name = %q", resp.Name)
+	}
+}
+
+func TestHandleUpdateProgram_InvalidRuleFieldOp(t *testing.T) {
+	e := newTestEnv(t)
+	id := createProgram(t, e, "/old", nil)
+
+	w := e.do(http.MethodPut, "/api/programs/"+id, map[string]any{
+		"src": "/new",
+		"rules": []map[string]any{
+			{"when": []map[string]any{{"field": "height", "op": "eq", "value": "1080"}},
+				"do": map[string]any{"cmd": "transcode"}},
+		},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d; body=%s, want 400 for invalid field/op combo", w.Code, w.Body.String())
 	}
 }
 

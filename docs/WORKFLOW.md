@@ -235,10 +235,10 @@ per field:
 | `height` | `gt`, `lt`, `ge`, `le` |
 | `width`, `bitrate`, `duration` | `gt`, `lt` |
 
-The rule parser does **not** enforce this — a rule like `when width le 1920 do
-...` renders without error, but the generated script fails at run time with
-`Error: unknown flag: --width-le`. Stick to the valid-operator table above
-until this is validated at `smelt workflow` render time.
+The rule parser enforces this at `smelt workflow` render time — a rule like
+`when width le 1920 do ...` is rejected immediately with `operator "le" not
+valid for field "width" (valid: gt, lt)` instead of producing a script that
+fails later with `Error: unknown flag: --width-le`.
 
 ### Actions
 
