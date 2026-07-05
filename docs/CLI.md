@@ -773,10 +773,10 @@ Examples:
   smelt each --src /mnt/media --ext mkv --name nightly --run-id "$RUN_ID"
 
 Flags:
-      --ext strings    file extensions to match (default [mkv,mp4,avi])
-  -h, --help           help for each
-      --name string    run name recorded in the history DB (with --run-id)
-      --src string     source directory to scan (default ".")
+      --ext strings   file extensions to match (default [mkv,mp4,avi])
+  -h, --help          help for each
+      --name string   run name recorded in the history DB (with --run-id)
+      --src string    source directory to scan (default ".")
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
@@ -882,23 +882,23 @@ Examples:
   smelt match clip.mp4 --duration-lt 60
 
 Flags:
-      --audio-eq string    first audio codec equals
-      --audio-ne string    first audio codec does not equal
-      --bitrate-gt int     overall bitrate > N kbps
-      --bitrate-lt int     overall bitrate < N kbps
-      --codec-eq string    video codec equals
-      --codec-ne string    video codec does not equal
-      --duration-gt float  duration > N seconds
-      --duration-lt float  duration < N seconds
-      --ext-eq string      file extension equals (without dot)
-      --ext-ne string      file extension does not equal
-      --height-ge int      height >= N
-      --height-gt int      height greater than N
-      --height-le int      height <= N
-      --height-lt int      height less than N
-  -h, --help               help for match
-      --width-gt int       width greater than N
-      --width-lt int       width less than N
+      --audio-eq string     first audio codec equals
+      --audio-ne string     first audio codec does not equal
+      --bitrate-gt int      overall bitrate > N kbps
+      --bitrate-lt int      overall bitrate < N kbps
+      --codec-eq string     video codec equals
+      --codec-ne string     video codec does not equal
+      --duration-gt float   duration > N seconds
+      --duration-lt float   duration < N seconds
+      --ext-eq string       file extension equals (without dot)
+      --ext-ne string       file extension does not equal
+      --height-ge int       height >= N
+      --height-gt int       height greater than N
+      --height-le int       height <= N
+      --height-lt int       height less than N
+  -h, --help                help for match
+      --width-gt int        width greater than N
+      --width-lt int        width less than N
 
 Global Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
@@ -1275,8 +1275,7 @@ Global Flags:
 | Code | Meaning |
 |---|---|
 | 0 | config.yaml written successfully |
-| 1 | config.yaml already exists and `--force` was not set |
-| 2 | Failed to write file (permissions, disk full, etc.) |
+| 1 | config.yaml already exists and `--force` was not set, or the file could not be written (permissions, disk full, etc.) |
 
 ---
 

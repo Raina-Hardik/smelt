@@ -83,14 +83,16 @@ These require ffmpeg and ffprobe on `$PATH` and may take several seconds.
 ## Local Dev Hooks
 
 The pre-commit hook in `.githooks/pre-commit` auto-formats staged Go files with
-`gofmt`, runs `go vet`, and runs `golangci-lint`. Install it once after cloning:
+`gofmt`, then runs `golangci-lint` (its default rule set already includes
+`go vet`, so it isn't run separately). Install it once after cloning:
 
 ```bash
 just install-hooks
 ```
 
-This sets `core.hooksPath = .githooks` in your local git config. The hook is
-non-blocking if `golangci-lint` is not on `$PATH` (a warning is printed instead).
+This sets `core.hooksPath = .githooks` in your local git config. If
+`golangci-lint` isn't on `$PATH`, the hook falls back to a plain `go vet` and
+prints a warning instead of failing.
 
 ## Linting
 

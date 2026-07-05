@@ -185,7 +185,9 @@ transcode:
 | Env var | `SMELT_EXT` |
 
 File extensions to include in the scan. Case-insensitive. Leading dots are
-stripped automatically, so `mkv` and `.mkv` are equivalent.
+stripped automatically, so `mkv` and `.mkv` are equivalent. `SMELT_EXT` (a flat
+env var, unlike the YAML list) takes a comma-separated string, e.g.
+`SMELT_EXT=mkv,mp4,avi`.
 
 ```yaml
 transcode:
@@ -362,7 +364,9 @@ transcode:
 Skip files whose current video codec matches any entry in this list. Accepts the
 same aliases as `transcode.codec` (`h264`, `h265`, `av1`, `vp9`) as well as raw
 ffprobe codec names (`hevc`, `h264`, `av1`). Useful for protecting
-already-optimal files from being downgraded.
+already-optimal files from being downgraded. `SMELT_SKIP_SOURCE_CODEC` (a flat
+env var, unlike the YAML list) takes a comma-separated string, e.g.
+`SMELT_SKIP_SOURCE_CODEC=av1,h265`.
 
 ```yaml
 transcode:
@@ -503,6 +507,25 @@ transcode:
   decode_threads: 4
 ```
 
+#### `transcode.ffmpeg_args`
+
+| Attribute | Value |
+|---|---|
+| Type | `[]string` |
+| Default | `[]` |
+| CLI flag | `--ffmpeg-arg` (repeatable) |
+| Env var | none |
+
+Raw ffmpeg arguments passed through verbatim, appended after all computed
+flags (so they can override them). Combines with a profile's own `extra_args`:
+profile args come first, `--ffmpeg-arg`/this key refine or append after — see
+[Profiles](#profiles-section).
+
+```yaml
+transcode:
+  ffmpeg_args: ["-vf", "scale=1280:-2"]
+```
+
 #### `transcode.allow_hdr_loss`
 
 | Attribute | Value |
@@ -533,9 +556,14 @@ transcode:
 Named profiles group codec, CRF, preset, and extra ffmpeg arguments under a
 single key. Apply a profile with `--profile <name>` or set it in config.
 
-When `--profile` is specified, it overrides `transcode.codec`, `transcode.crf`,
-and `transcode.preset`. `extra_args` are appended to the ffmpeg argument list
-after all computed flags.
+When `--profile` is specified, it registers the profile's `codec`/`crf`/`preset`
+as **built-in defaults**, not overrides — so the actual precedence is
+`explicit CLI flag > explicit transcode.codec/crf/preset (config.yaml) >
+profile > built-in default`. A profile only fills in values you haven't set
+elsewhere; it never overrides an explicit `transcode.*` key already present in
+config.yaml. `extra_args` are appended to the ffmpeg argument list after all
+computed flags (see [`transcode.ffmpeg_args`](#transcodeffmpeg_args), which
+combines with it the same way).
 
 ```yaml
 profiles:

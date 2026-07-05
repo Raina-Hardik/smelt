@@ -69,6 +69,29 @@ func TestExplicitFlagOverridesProfile(t *testing.T) {
 	}
 }
 
+func TestConfigFileValueOverridesProfile(t *testing.T) {
+	viper.Reset()
+	setWebProfile()
+	viper.Set("transcode.profile", "web")
+	// MergeConfigMap lands values in viper's config-file tier, distinct from
+	// the override tier viper.Set uses — this is what a real config.yaml
+	// value occupies, and it must still beat the profile's SetDefault.
+	if err := viper.MergeConfigMap(map[string]any{
+		"transcode": map[string]any{"codec": "av1"},
+	}); err != nil {
+		t.Fatalf("MergeConfigMap: %v", err)
+	}
+
+	cfg := Load()
+
+	if cfg.Codec != "av1" {
+		t.Errorf("config.yaml codec should beat profile: got %q, want av1", cfg.Codec)
+	}
+	if cfg.Preset != "fast" {
+		t.Errorf("unset preset should still come from profile: got %q, want fast", cfg.Preset)
+	}
+}
+
 func TestProfileExtraArgsPrecedeCLIArgs(t *testing.T) {
 	viper.Reset()
 	setWebProfile()
