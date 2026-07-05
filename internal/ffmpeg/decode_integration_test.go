@@ -41,9 +41,9 @@ func TestVAAPIFullPipelineIntegration(t *testing.T) {
 	requireBackend(t, "hevc_vaapi", "vaapi")
 
 	cases := []struct {
-		name    string
-		gen     []string
-		depth   int
+		name  string
+		gen   []string
+		depth int
 	}{
 		{"8bit-h264", []string{"-c:v", "libx264", "-pix_fmt", "yuv420p"}, 8},
 		{"10bit-hevc", []string{"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=none"}, 10},

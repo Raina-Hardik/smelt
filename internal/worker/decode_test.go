@@ -111,7 +111,9 @@ func TestDecideDecodeExoticShapesGoSoftware(t *testing.T) {
 
 func TestDecideDecodeAttrsProbeFailureKeepsV020Behavior(t *testing.T) {
 	stubWorkerFFmpeg(t)
-	probeAttrs = func(ctx context.Context, path string) (*ffmpeg.FileAttrs, error) { return nil, errors.New("unreadable") }
+	probeAttrs = func(ctx context.Context, path string) (*ffmpeg.FileAttrs, error) {
+		return nil, errors.New("unreadable")
+	}
 	pool := newResolvedPool(&config.Config{Workers: 1, HWDecode: "auto"}, "hevc_vaapi", "vaapi")
 	spec := ffmpeg.EncodeSpec{Codec: "h265", Encoder: "hevc_vaapi", Backend: "vaapi"}
 	pool.decideDecode(context.Background(), "a.mkv", &spec)
@@ -122,7 +124,7 @@ func TestDecideDecodeAttrsProbeFailureKeepsV020Behavior(t *testing.T) {
 
 // transcodeFile drives Pool.transcode against a stubbed ffmpegRun in a temp
 // dir, returning the error and how many times ffmpeg "ran".
-func transcodeFile(t *testing.T, cfg *config.Config, run func(call int, spec ffmpeg.EncodeSpec) error) (error, int) {
+func transcodeFile(t *testing.T, cfg *config.Config, run func(call int, spec ffmpeg.EncodeSpec) error) (int, error) {
 	t.Helper()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.mkv")
@@ -148,7 +150,7 @@ func transcodeFile(t *testing.T, cfg *config.Config, run func(call int, spec ffm
 	}
 	pool := newResolvedPool(cfg, "hevc_vaapi", "vaapi")
 	err := pool.transcode(context.Background(), scanner.MediaFile{Path: src, RelPath: "in.mkv"}, nil)
-	return err, calls
+	return calls, err
 }
 
 func hwDecodeStubs(t *testing.T) {
@@ -159,7 +161,7 @@ func hwDecodeStubs(t *testing.T) {
 
 func TestRetrySucceedsWithSoftwareDecode(t *testing.T) {
 	hwDecodeStubs(t)
-	err, calls := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
+	calls, err := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
 		if call == 1 {
 			if spec.DecodeBackend != "vaapi" {
 				t.Errorf("first attempt DecodeBackend = %q, want vaapi", spec.DecodeBackend)
@@ -181,7 +183,7 @@ func TestRetrySucceedsWithSoftwareDecode(t *testing.T) {
 
 func TestRetryFailureCountsOnce(t *testing.T) {
 	hwDecodeStubs(t)
-	err, calls := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
+	calls, err := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
 		return &ffmpeg.ExecError{FilePath: "in.mkv", ExitCode: 1, Stderr: "still broken"}
 	})
 	if err == nil {
@@ -195,7 +197,7 @@ func TestRetryFailureCountsOnce(t *testing.T) {
 func TestNoRetryWithSoftwareDecode(t *testing.T) {
 	hwDecodeStubs(t)
 	probeDecode = func(ctx context.Context, backend, src string, a *ffmpeg.FileAttrs) bool { return false }
-	_, calls := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
+	calls, _ := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
 		return &ffmpeg.ExecError{FilePath: "in.mkv", ExitCode: 1}
 	})
 	if calls != 1 {
@@ -205,7 +207,7 @@ func TestNoRetryWithSoftwareDecode(t *testing.T) {
 
 func TestNoRetryOnOSError(t *testing.T) {
 	hwDecodeStubs(t)
-	_, calls := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
+	calls, _ := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
 		return &ffmpeg.OSError{FilePath: "in.mkv", Err: errors.New("fork failed")}
 	})
 	if calls != 1 {
