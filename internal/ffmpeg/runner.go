@@ -585,30 +585,71 @@ func probeDuration(ctx context.Context, path string) (time.Duration, error) {
 	return time.Duration(secs * float64(time.Second)), nil
 }
 
-// FileAttrs carries per-file attributes used by the smelt match command.
+// FileAttrs carries per-file attributes used by the smelt match command and
+// the per-file hardware-decode decision (codec × profile × pix_fmt is the
+// decode-probe cache key; BitDepth drives nv12/p010 and main10 selection).
 type FileAttrs struct {
 	VideoCodec string
 	AudioCodec string
+	Profile    string // video profile as ffprobe reports it (e.g. "Main 10", "High")
+	PixFmt     string // video pixel format (e.g. yuv420p, yuv420p10le)
+	BitDepth   int    // bits per component derived from PixFmt (8 when unsuffixed)
 	Height     int64
 	Width      int64
 	BitRate    int64 // kbps, overall container bitrate
 	DurationS  float64
 }
 
-// ProbeAttrs queries a file for the attributes used by smelt match.
+// pixFmtDepthRe captures the bit-depth suffix ffmpeg pixel formats carry
+// directly before their endianness marker (yuv420p10le → 10, p016le → 16).
+var pixFmtDepthRe = regexp.MustCompile(`(\d{1,2})(le|be)$`)
+
+// bitDepthFromPixFmt derives bits per component from a pixel format name.
+// Formats without a depth+endianness suffix (yuv420p, nv12, …) are 8-bit.
+func bitDepthFromPixFmt(pixFmt string) int {
+	if pixFmt == "" {
+		return 0
+	}
+	if m := pixFmtDepthRe.FindStringSubmatch(pixFmt); m != nil {
+		d, _ := strconv.Atoi(m[1])
+		return d
+	}
+	return 8
+}
+
+// HWPipelineBitDepth returns 8 or 10 for the 4:2:0 pixel formats the hardware
+// pipeline supports, and 0 for everything else (12-bit, 4:2:2, 4:4:4, exotic
+// formats) — those always take the software pipeline; no p010 mapping is
+// attempted for them.
+func HWPipelineBitDepth(pixFmt string) int {
+	switch pixFmt {
+	case "yuv420p", "yuvj420p", "nv12", "nv21":
+		return 8
+	case "yuv420p10le", "p010le":
+		return 10
+	}
+	return 0
+}
+
+// ProbeAttrs queries a file for the attributes used by smelt match and the
+// hardware-decode decision.
 func ProbeAttrs(ctx context.Context, path string) (*FileAttrs, error) {
 	out, err := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
-		"-show_entries", "stream=codec_type,codec_name,height,width:format=bit_rate,duration",
+		"-show_entries", "stream=codec_type,codec_name,profile,pix_fmt,height,width:format=bit_rate,duration",
 		"-of", "default=noprint_wrappers=1",
 		path,
 	).Output()
 	if err != nil {
 		return nil, err
 	}
+	return parseAttrs(string(out)), nil
+}
+
+func parseAttrs(out string) *FileAttrs {
 	a := &FileAttrs{}
 	var lastType string
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
@@ -621,6 +662,15 @@ func ProbeAttrs(ctx context.Context, path string) (*FileAttrs, error) {
 				a.VideoCodec = v
 			} else if lastType == "audio" && a.AudioCodec == "" {
 				a.AudioCodec = v
+			}
+		case "profile":
+			if lastType == "video" && a.Profile == "" {
+				a.Profile = v
+			}
+		case "pix_fmt":
+			if lastType == "video" && a.PixFmt == "" {
+				a.PixFmt = v
+				a.BitDepth = bitDepthFromPixFmt(v)
 			}
 		case "height":
 			if lastType == "video" {
@@ -638,7 +688,7 @@ func ProbeAttrs(ctx context.Context, path string) (*FileAttrs, error) {
 			a.DurationS, _ = strconv.ParseFloat(v, 64)
 		}
 	}
-	return a, nil
+	return a
 }
 
 func truncate(s string, n int) string {
