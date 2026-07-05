@@ -57,6 +57,14 @@ func init() {
 }
 
 func runWatch(cmd *cobra.Command, _ []string) error {
+	interval, _ := cmd.Flags().GetDuration("interval")
+	once, _ := cmd.Flags().GetBool("once")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	name, _ := cmd.Flags().GetString("name")
+	if !once && interval <= 0 {
+		return exitErr(2, fmt.Errorf("--interval must be > 0 (got %s); use --once for a single pass", interval))
+	}
+
 	if err := ffmpeg.CheckDeps(); err != nil {
 		return err
 	}
@@ -65,14 +73,6 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 		return exitErr(2, err)
 	}
 	configureLogger(cfg.LogLevel, cfg.LogFormat)
-
-	interval, _ := cmd.Flags().GetDuration("interval")
-	once, _ := cmd.Flags().GetBool("once")
-	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	name, _ := cmd.Flags().GetString("name")
-	if !once && interval <= 0 {
-		return exitErr(2, fmt.Errorf("--interval must be > 0 (got %s); use --once for a single pass", interval))
-	}
 
 	database, err := openDB()
 	if err != nil {
