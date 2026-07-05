@@ -36,6 +36,7 @@ transcode:
   crf: 23                     # int      — constant rate factor, 0–51
   preset: medium              # string   — encoding preset (normalized per encoder)
   hwaccel: auto               # string   — auto | none | nvenc | qsv | vaapi | amf | videotoolbox
+  hwdecode: auto              # string   — auto | off; hw decode on the encoder's device when probed decodable
   audio_codec: copy           # string   — copy | aac | opus | mp3 | ac3 | flac
   audio_bitrate: ""           # string   — e.g. 192k; only when re-encoding audio
   subs: copy                  # string   — copy | drop (subtitle stream handling)
@@ -282,18 +283,55 @@ encoder for the target codec (running a tiny test encode — compiled-in is not
 enough) and falls back to software; `none` forces software. An explicit backend
 that turns out unusable also falls back. The chosen encoder is logged at start.
 
-smelt only ever accelerates *encode* — decode is always software, regardless
-of `hwaccel`. Whenever a hardware backend resolves, smelt logs a resource-profile
-warning: full-CPU decode running concurrently with the GPU/QSV/NVENC encode
-block is the most thermally demanding combination on constrained hardware
-(this also fires on `--dry-run`, before any file is touched). Use
-`decode_threads` to cap the decode side, and see
+When a hardware encoder resolves on `nvenc`, `qsv`, or `vaapi`, decode also
+runs on that *same device* for every file a per-file probe confirms is
+hardware-decodable there (see `transcode.hwdecode`), keeping the whole video
+pipeline in device memory. Files that aren't hardware-decodable — or all
+files with `hwdecode: off` — decode in software, and smelt logs a
+resource-profile warning for that combination: full-CPU decode running
+concurrently with the GPU/QSV/NVENC encode block is the most thermally
+demanding split on constrained hardware (this also fires on `--dry-run`,
+before any file is touched). Use `decode_threads` to cap the software-decode
+side, and see
 [Running politely on constrained hardware](../README.md#running-politely-on-constrained-hardware)
-for OS-level throttling.
+for OS-level throttling. `amf` and `videotoolbox` are encode-only backends:
+decode is always software there this release.
 
 ```yaml
 transcode:
   hwaccel: auto
+```
+
+#### `transcode.hwdecode`
+
+| Attribute | Value |
+|---|---|
+| Type | `string` |
+| Default | `auto` |
+| Valid values | `auto` \| `off` |
+| CLI flag | `--hwdecode` |
+| Env var | `SMELT_HWDECODE` |
+
+Hardware-accelerated decoding, on the *same device* as the resolved hardware
+encoder — never a second GPU; frames never cross a device boundary. `auto`
+decodes a file in hardware when a functional probe against the actual file
+confirms the device can decode it; the result is cached per source shape
+(codec × profile × pixel format), so identically-shaped libraries pay for one
+~1 s probe. A file whose shape the device can't decode falls back to software
+decode silently (debug-logged once per shape). No value *forces* hardware
+decode; `off` disables it entirely.
+
+If ffmpeg fails while hardware decode is active, the file is retried exactly
+once with software decode before being counted as failed, and the cached probe
+result for that shape is evicted. 10-bit sources use the hardware pipeline
+only when the device can also encode `main10` (probed); otherwise the whole
+file takes the software pipeline rather than being silently flattened to
+8-bit. Has no effect with a software encoder, or on the encode-only
+`amf`/`videotoolbox` backends.
+
+```yaml
+transcode:
+  hwdecode: auto
 ```
 
 #### `transcode.audio_codec`
@@ -499,8 +537,11 @@ Caps ffmpeg's decoder thread count. Emitted as a global `-threads N` *before*
 `-i`, so it constrains decode specifically — `extra_args`/`--ffmpeg-arg`
 options land after `-i` and only affect the encoder. Useful for large
 software-decoded sources (e.g. 10-bit 4K HEVC) run alongside a hardware
-encoder backend, where decode is otherwise uncapped. See the `hwaccel`
-resource-profile warning below.
+encoder backend, where decode is otherwise uncapped. While hardware decode is
+active for a file (see `transcode.hwdecode`), `-threads` is omitted from the
+command; the cap still applies on every software-decode path (opt-out,
+un-decodable sources, and the automatic retry). See the `hwaccel`
+resource-profile warning above.
 
 ```yaml
 transcode:

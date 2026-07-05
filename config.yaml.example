@@ -38,6 +38,12 @@ transcode:
   # "auto" probes for a usable GPU encoder and falls back to software.
   hwaccel: auto
 
+  # Hardware decode: auto | off. "auto" decodes on the hardware encoder's own
+  # device when a per-file probe confirms the source is decodable there, else
+  # software (a hardware-decode failure retries that file once in software).
+  # "off" forces software decode. No effect with a software encoder.
+  hwdecode: auto
+
   # Audio codec: copy | aac | opus | mp3 | ac3 | flac
   # "copy" stream-copies the audio untouched; others re-encode.
   audio_codec: copy
