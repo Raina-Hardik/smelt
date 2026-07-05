@@ -974,10 +974,12 @@ Flags:
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
+      --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder
       --ffmpeg-arg stringArray          raw ffmpeg argument passed through verbatim; repeatable (e.g. --ffmpeg-arg=-vf --ffmpeg-arg=scale=1280:-2)
       --force                           re-transcode even if the output file already exists
   -h, --help                            help for do
       --hwaccel string                  hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox (default "auto")
+      --i-know-this-drops-hdr           required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss
       --inplace                         replace original after transcode; files already in the target codec are skipped (use --force to re-encode)
       --output-dir string               write output files to this directory instead of alongside source
       --preset string                   encoding preset; normalized into the chosen encoder's namespace (e.g. x264 'superfast' → nvenc 'fast') (default "medium")
