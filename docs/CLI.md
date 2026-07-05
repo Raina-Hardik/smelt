@@ -928,7 +928,12 @@ does.
 
 With `--run-id` (global), `do <file> transcode` heartbeats per-file progress
 into the history database. The job row must already exist — created by
-`smelt each --run-id`.
+`smelt each --run-id`. In this mode failure is tracked as a `failed` job row,
+not a process exit code: the command always exits `0`, so scripts rely on
+`smelt finish-run`/the history DB rather than `$?` to detect per-file failure.
+Without `--run-id`, a failed transcode exits `3` (never `4` — that code is
+reserved for `smelt transcode`'s directory-wide "all files failed" case, which
+doesn't apply to a single file).
 
 ### Synopsis
 
@@ -1309,7 +1314,9 @@ smelt v1.0.0 (go1.26.3, linux/amd64)
 
 ## Exit Codes
 
-These codes apply to `smelt transcode`, `smelt tui`, and `smelt do <file> transcode`.
+These codes apply to `smelt transcode` and `smelt tui`. `smelt do <file> transcode`
+shares codes `0`/`2`/`3` (never `4`, and never any code at all when `--run-id`
+is set — see [`smelt do`](#smelt-do)).
 
 | Code | Meaning |
 |---|---|
