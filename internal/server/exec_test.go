@@ -69,7 +69,7 @@ func TestTriggerRun_ScriptWritten(t *testing.T) {
 	d := openTestDB(t)
 	dir := t.TempDir()
 	bin := writeFakeBinary(t, "exit 0")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "script-written-run"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {
@@ -86,7 +86,7 @@ func TestTriggerRun_ScriptContainsBinary(t *testing.T) {
 	d := openTestDB(t)
 	dir := t.TempDir()
 	bin := writeFakeBinary(t, "exit 0")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "script-content-run"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {
@@ -110,7 +110,7 @@ func TestTriggerRun_LogFileCreated(t *testing.T) {
 	d := openTestDB(t)
 	dir := t.TempDir()
 	bin := writeFakeBinary(t, "exit 0")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "log-file-run"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {
@@ -133,7 +133,7 @@ func TestTriggerRun_ProcessTracked(t *testing.T) {
 	dir := t.TempDir()
 	// Use a sleepy binary so the process stays alive long enough to inspect.
 	bin := writeFakeBinary(t, "sleep 30")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "tracked-run"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {
@@ -151,7 +151,7 @@ func TestTriggerRun_ProcessCleansUpAfterCompletion(t *testing.T) {
 	d := openTestDB(t)
 	dir := t.TempDir()
 	bin := writeFakeBinary(t, "exit 0")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "cleanup-run"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {
@@ -172,7 +172,7 @@ func TestTriggerRun_UniqueRunIDs(t *testing.T) {
 	d := openTestDB(t)
 	dir := t.TempDir()
 	bin := writeFakeBinary(t, "exit 0")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	// Each run uses a distinct program name so their flock locks don't collide.
 	for i, id := range []string{"run-a", "run-b", "run-c"} {
@@ -195,7 +195,7 @@ func TestTriggerRun_UniqueRunIDs(t *testing.T) {
 
 func TestCancelRun_UnknownRunID(t *testing.T) {
 	d := openTestDB(t)
-	srv := New(d, t.TempDir(), "smelt")
+	srv := New(d, t.TempDir(), "smelt", "")
 	if srv.cancelRun("not-a-run") {
 		t.Error("cancelRun should return false for unknown run_id")
 	}
@@ -206,7 +206,7 @@ func TestCancelRun_KillsProcess(t *testing.T) {
 	dir := t.TempDir()
 	// Sleepy binary so the process is still running when we cancel.
 	bin := writeFakeBinary(t, "sleep 60")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "cancel-me"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {
@@ -234,7 +234,7 @@ func TestCancelRun_IdempotentAfterCompletion(t *testing.T) {
 	d := openTestDB(t)
 	dir := t.TempDir()
 	bin := writeFakeBinary(t, "exit 0")
-	srv := New(d, dir, bin)
+	srv := New(d, dir, bin, "")
 
 	runID := "idem-run"
 	if err := srv.triggerRun(runID, newTestProgram(t, "/src")); err != nil {

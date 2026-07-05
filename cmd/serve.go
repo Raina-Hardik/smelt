@@ -7,6 +7,7 @@ import (
 
 	"github.com/Raina-Hardik/smelt/internal/server"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var serveCmd = &cobra.Command{
@@ -52,6 +53,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("create scripts dir %s: %w", scriptsDir, err)
 	}
 
+	dbPath := viper.GetString("smelt.db")
 	database, err := openDB()
 	if err != nil {
 		return fmt.Errorf("open history db: %w", err)
@@ -66,6 +68,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		bin = "smelt"
 	}
 
-	srv := server.New(database, scriptsDir, bin)
+	srv := server.New(database, scriptsDir, bin, dbPath)
 	return srv.Start(addr)
 }

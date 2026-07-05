@@ -80,6 +80,8 @@ func runWorkflow(cmd *cobra.Command, _ []string) error {
 		Schedule: schedule,
 		Version:  version,
 		Now:      time.Now(),
+		DBSet:    true,
+		DBPath:   cfg.DBPath,
 	}
 
 	var script string

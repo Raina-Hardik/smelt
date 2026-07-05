@@ -11,9 +11,9 @@ import (
 //
 //	(codec/audio/ext support eq/ne; numeric fields support all six)
 type Cond struct {
-	Field string
-	Op    string
-	Value string
+	Field string `json:"field"`
+	Op    string `json:"op"`
+	Value string `json:"value"`
 }
 
 // Action is a smelt subcommand applied to a matching file.
@@ -22,15 +22,15 @@ type Cond struct {
 // e.g. ["--codec", "'h265'", "--crf", "'24'"]); empty for skip.
 // Build Args from a *config.Config via TranscodeArgs.
 type Action struct {
-	Cmd  string
-	Args []string
+	Cmd  string   `json:"cmd"`
+	Args []string `json:"args"`
 }
 
 // Rule is a condition set → action. All Conds are AND-combined.
 // Empty When means "always match" — a catch-all (e.g. a final `do skip`).
 type Rule struct {
-	When []Cond
-	Do   Action
+	When []Cond `json:"when"`
+	Do   Action `json:"do"`
 }
 
 // Program is the IR for a smelt decision workflow.
@@ -97,8 +97,13 @@ func Render(p Program, opts Options) string {
 	// even cron and manual runs are visible in the dashboard.
 	b.WriteString("RUN_ID=\"${SMELT_RUN_ID:-$(date +%s)-$$}\"\n\n")
 
-	fmt.Fprintf(&b, "%s each --src %s --ext %s --name %s --run-id \"$RUN_ID\" | while IFS= read -r _smelt_file; do\n",
-		qbin, shellQuote(p.Src), shellQuote(strings.Join(p.Ext, ",")), shellQuote(name))
+	dbFlag := ""
+	if opts.DBSet {
+		dbFlag = " --db " + shellQuote(opts.DBPath)
+	}
+
+	fmt.Fprintf(&b, "%s each --src %s --ext %s --name %s --run-id \"$RUN_ID\"%s | while IFS= read -r _smelt_file; do\n",
+		qbin, shellQuote(p.Src), shellQuote(strings.Join(p.Ext, ",")), shellQuote(name), dbFlag)
 
 	hasBody := false
 	hasIf := false
@@ -107,9 +112,9 @@ func Render(p Program, opts Options) string {
 		if len(r.When) == 0 {
 			// Catch-all: first match wins, so nothing after it can fire.
 			if hasIf {
-				fmt.Fprintf(&b, "\telse\n\t\t%s\n", branchBody(qbin, r.Do))
+				fmt.Fprintf(&b, "\telse\n\t\t%s\n", branchBody(qbin, r.Do, dbFlag))
 			} else {
-				fmt.Fprintf(&b, "\t%s\n", branchBody(qbin, r.Do))
+				fmt.Fprintf(&b, "\t%s\n", branchBody(qbin, r.Do, dbFlag))
 			}
 			break
 		}
@@ -119,7 +124,7 @@ func Render(p Program, opts Options) string {
 			hasIf = true
 		}
 		fmt.Fprintf(&b, "\t%s %s match \"$_smelt_file\"%s; then\n\t\t%s\n",
-			kw, qbin, renderMatchArgs(r.When), branchBody(qbin, r.Do))
+			kw, qbin, renderMatchArgs(r.When), branchBody(qbin, r.Do, dbFlag))
 	}
 	if hasIf {
 		b.WriteString("\tfi\n")
@@ -131,7 +136,7 @@ func Render(p Program, opts Options) string {
 	}
 	b.WriteString("done\n\n")
 
-	fmt.Fprintf(&b, "%s finish-run --run-id \"$RUN_ID\"\n", qbin)
+	fmt.Fprintf(&b, "%s finish-run --run-id \"$RUN_ID\"%s\n", qbin, dbFlag)
 	return b.String()
 }
 
@@ -139,7 +144,7 @@ func Render(p Program, opts Options) string {
 // check delegate to `smelt do`; skip (and anything unknown) is a no-op so the
 // file is left untouched (finish-run later records it as skipped). A failing
 // `do` must not abort the whole program, hence `|| true`.
-func branchBody(qbin string, a Action) string {
+func branchBody(qbin string, a Action, dbFlag string) string {
 	switch a.Cmd {
 	case "transcode", "check":
 		var b strings.Builder
@@ -151,6 +156,7 @@ func branchBody(qbin string, a Action) string {
 		if a.Cmd == "transcode" {
 			b.WriteString(" --run-id \"$RUN_ID\" -y")
 		}
+		b.WriteString(dbFlag)
 		b.WriteString(" || true")
 		return b.String()
 	default: // skip, copy, unknown

@@ -25,6 +25,8 @@ func (s *Server) triggerRun(runID string, p workflow.Program) error {
 		Binary:  bin,
 		Version: "",
 		Now:     time.Now(),
+		DBSet:   true,
+		DBPath:  s.dbPath,
 	})
 
 	scriptPath := filepath.Join(s.scriptsDir, "smelt-"+runID+".sh")

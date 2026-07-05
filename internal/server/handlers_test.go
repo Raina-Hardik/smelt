@@ -29,7 +29,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("open test db: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	srv := New(database, dir, "smelt")
+	srv := New(database, dir, "smelt", "")
 	return &testEnv{srv: srv, h: srv.Handler(), db: database}
 }
 

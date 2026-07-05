@@ -1,12 +1,29 @@
 package workflow
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 )
+
+func TestRuleJSONTagsAreLowercase(t *testing.T) {
+	r := Rule{
+		When: []Cond{{Field: "codec", Op: "ne", Value: "hevc"}},
+		Do:   Action{Cmd: "transcode", Args: []string{"--codec", "h265"}},
+	}
+	out, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got := string(out)
+	want := `{"when":[{"field":"codec","op":"ne","value":"hevc"}],"do":{"cmd":"transcode","args":["--codec","h265"]}}`
+	if got != want {
+		t.Errorf("Rule JSON shape mismatch (server API contract):\n got:  %s\n want: %s", got, want)
+	}
+}
 
 var testOpts = Options{
 	Binary:  "/usr/bin/smelt",
@@ -126,6 +143,39 @@ func TestRenderEmitsRunLifecycle(t *testing.T) {
 	}
 }
 
+func TestRenderThreadsDBFlag(t *testing.T) {
+	p := Program{
+		Name: "nightly",
+		Src:  "/mnt/media",
+		Ext:  []string{"mkv"},
+		Rules: []Rule{
+			{When: []Cond{{Field: "codec", Op: "ne", Value: "hevc"}}, Do: Action{Cmd: "transcode", Args: []string{"--codec", "h265"}}},
+		},
+	}
+
+	opts := testOpts
+	opts.DBSet = true
+	opts.DBPath = "/data/history.db"
+	out := Render(p, opts)
+
+	if !strings.Contains(out, "each --src '/mnt/media' --ext 'mkv' --name 'nightly' --run-id \"$RUN_ID\" --db '/data/history.db'") {
+		t.Error("each invocation missing threaded --db flag")
+	}
+	if !strings.Contains(out, "--run-id \"$RUN_ID\" -y --db '/data/history.db' || true") {
+		t.Error("do invocation missing threaded --db flag")
+	}
+	if !strings.Contains(out, "finish-run --run-id \"$RUN_ID\" --db '/data/history.db'") {
+		t.Error("finish-run invocation missing threaded --db flag")
+	}
+
+	// DBSet=false (e.g. --db "" explicitly disabled, or caller opted out)
+	// must not emit a bare "--db" with no value.
+	withoutDB := Render(p, testOpts)
+	if strings.Contains(withoutDB, "--db") {
+		t.Error("Render emitted --db when DBSet was false")
+	}
+}
+
 func TestRuleArgsRoundTrip(t *testing.T) {
 	p := Program{
 		Name: "p",
@@ -233,5 +283,8 @@ func TestTranscodeArgsExported(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--crf") {
 		t.Error("TranscodeArgs missing --crf flag")
+	}
+	if !strings.Contains(joined, "--db "+shellQuote(cfg.DBPath)) {
+		t.Error("TranscodeArgs missing threaded --db flag (subprocess would fall back to the default DB path)")
 	}
 }

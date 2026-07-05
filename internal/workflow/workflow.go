@@ -20,6 +20,8 @@ type Options struct {
 	Schedule string    // cron expression, for the documented schedule (optional)
 	Version  string    // smelt version, recorded in the header
 	Now      time.Time // generation timestamp
+	DBSet    bool      // whether DBPath was explicitly resolved by the caller
+	DBPath   string    // --db value to pass to every history-writing subcommand the script invokes
 }
 
 // Script renders the workflow shell script for cfg + opts.
@@ -115,6 +117,7 @@ func TranscodeArgs(cfg *config.Config) []string {
 	if cfg.AllowHDRLoss {
 		args = append(args, "--i-know-this-drops-hdr")
 	}
+	args = append(args, flag("--db", cfg.DBPath))
 	// Non-interactive: a scheduled run must never block on a confirmation prompt.
 	if cfg.InPlace {
 		args = append(args, "--assume-yes")
