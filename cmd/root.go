@@ -99,6 +99,7 @@ var envVarBindings = map[string]string{
 	"transcode.crf":                "SMELT_CRF",
 	"transcode.preset":             "SMELT_PRESET",
 	"transcode.hwaccel":            "SMELT_HWACCEL",
+	"transcode.hwdecode":           "SMELT_HWDECODE",
 	"transcode.audio_codec":        "SMELT_AUDIO_CODEC",
 	"transcode.audio_bitrate":      "SMELT_AUDIO_BITRATE",
 	"transcode.subs":               "SMELT_SUBS",

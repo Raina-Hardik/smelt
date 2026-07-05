@@ -27,6 +27,7 @@ type Config struct {
 	AudioCodec       string // audio codec alias or "copy" (default copy = stream-copy)
 	AudioBitrate     string // e.g. "192k"; applied only when re-encoding audio
 	HWAccel          string // auto|none|nvenc|qsv|vaapi|amf|videotoolbox
+	HWDecode         string // auto|off; hw decode on the resolved encoder's device when probed decodable
 	InPlace          bool
 	SkipHardlinked   bool     // --inplace: skip files hardlinked elsewhere (avoid breaking the link)
 	SkipSourceCodecs []string // skip files whose current video codec is in this list (e.g. av1)
@@ -58,6 +59,7 @@ func Defaults() *Config {
 		Workers:      runtime.NumCPU(),
 		Suffix:       ".smelt",
 		HWAccel:      "auto",
+		HWDecode:     "auto",
 		AudioCodec:   "copy",
 		SubtitleMode: "copy",
 		LogLevel:     "info",
@@ -101,6 +103,11 @@ func Load() *Config {
 		hwaccel = "auto"
 	}
 
+	hwdecode := viper.GetString("transcode.hwdecode")
+	if hwdecode == "" {
+		hwdecode = "auto"
+	}
+
 	audioCodec := viper.GetString("transcode.audio_codec")
 	if audioCodec == "" {
 		audioCodec = "copy"
@@ -119,6 +126,7 @@ func Load() *Config {
 		AudioCodec:       audioCodec,
 		AudioBitrate:     viper.GetString("transcode.audio_bitrate"),
 		HWAccel:          hwaccel,
+		HWDecode:         hwdecode,
 		InPlace:          viper.GetBool("transcode.inplace"),
 		SkipHardlinked:   viper.GetBool("transcode.skip_hardlinked"),
 		SkipSourceCodecs: getStringSlice("transcode.skip_source_codecs"),
@@ -188,6 +196,11 @@ func (c *Config) Validate() error {
 	}
 	if !ffmpeg.IsKnownHWAccel(c.HWAccel) {
 		return fmt.Errorf("unknown --hwaccel %q; valid: auto, none, nvenc, qsv, vaapi, amf, videotoolbox", c.HWAccel)
+	}
+	switch strings.ToLower(c.HWDecode) {
+	case "", "auto", "off": // "" == auto (Load defaults it)
+	default:
+		return fmt.Errorf("unknown --hwdecode %q; valid: auto, off", c.HWDecode)
 	}
 	if c.AudioCodec != "" && !ffmpeg.IsKnownAudioCodec(c.AudioCodec) { // "" == copy (Load defaults it)
 		return fmt.Errorf("unknown --audio-codec %q; valid: %s", c.AudioCodec, strings.Join(ffmpeg.KnownAudioCodecs(), ", "))

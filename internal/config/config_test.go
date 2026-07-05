@@ -147,6 +147,18 @@ func TestValidateRejectsBadAudioCodec(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsBadHWDecode(t *testing.T) {
+	viper.Reset()
+	if err := (&Config{Codec: "h265", HWDecode: "on"}).Validate(); err == nil {
+		t.Error("expected unknown hwdecode value to be rejected")
+	}
+	for _, v := range []string{"", "auto", "off", "AUTO"} {
+		if err := (&Config{Codec: "h265", HWDecode: v}).Validate(); err != nil {
+			t.Errorf("hwdecode %q should be valid: %v", v, err)
+		}
+	}
+}
+
 func TestValidateRejectsInplaceWithOutputDir(t *testing.T) {
 	viper.Reset()
 	cfg := &Config{InPlace: true, OutputDir: "/out"}

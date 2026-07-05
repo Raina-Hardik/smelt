@@ -176,6 +176,10 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"hardware acceleration: auto|none|nvenc|qsv|vaapi|amf|videotoolbox",
 	)
 	cmd.Flags().String(
+		"hwdecode", "auto",
+		"hardware decode: auto|off; auto decodes on the hardware encoder's device when a per-file probe confirms the source is decodable there, else software (a hardware-decode failure retries that file once with software decode); off forces software decode",
+	)
+	cmd.Flags().String(
 		"audio-codec", "copy",
 		"audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode)",
 	)
@@ -249,6 +253,7 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.crf", "crf"},
 		{"transcode.preset", "preset"},
 		{"transcode.hwaccel", "hwaccel"},
+		{"transcode.hwdecode", "hwdecode"},
 		{"transcode.audio_codec", "audio-codec"},
 		{"transcode.audio_bitrate", "audio-bitrate"},
 		{"smelt.workers", "workers"},
