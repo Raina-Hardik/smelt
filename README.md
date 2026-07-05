@@ -14,7 +14,7 @@ everything — fast, observable, and cancellable.
 ## Features
 
 - **Parallel transcoding** — semaphore-gated worker pool, configurable to any concurrency level
-- **Hardware acceleration** — `--hwaccel auto` functionally probes for a usable GPU encoder (NVENC / QSV / VAAPI / AMF / VideoToolbox) and falls back to software
+- **Hardware acceleration** — `--hwaccel auto` functionally probes for a usable GPU encoder (NVENC / QSV / VAAPI / AMF / VideoToolbox) and falls back to software; on NVENC/QSV/VAAPI, decode runs on the same device too when a per-file probe confirms the source is decodable there (`--hwdecode auto`, opt out with `off`)
 - **Interactive TUI** — editable pre-flight screen, live per-file progress bars, file queue, pause/resume, clean cancellation
 - **Audio control** — stream-copy by default, or re-encode with `--audio-codec` / `--audio-bitrate`
 - **Container conversion** — retarget the container with `--to mp4|mkv|webm` (mp4 gets faststart + hvc1)
@@ -130,8 +130,11 @@ docker run -d --name smelt-serve -p 7700:7700 \
 ```
 
 The image has no hardware-acceleration device passthrough configured by
-default; add `--device /dev/dri` (VAAPI) or the equivalent for your GPU
-backend if you need `--hwaccel` inside the container.
+default; add `--device /dev/dri` (VAAPI/QSV) or the NVIDIA container runtime
+(CUDA/NVENC) if you need `--hwaccel` — and hardware decode with it — inside
+the container. Alpine's ffmpeg build may also lack hardware acceleration
+support entirely; smelt's functional probes make this safe (everything falls
+back to software), it just won't be accelerated.
 
 ---
 
@@ -181,17 +184,29 @@ single large file, where one ffmpeg process is free to use every core and
 thread it can get. That matters most for a big software-decoded source (e.g.
 10-bit 4K HEVC) on thin-and-light or otherwise thermally limited hardware.
 
-smelt only ever accelerates the *encode* side. Decode is always software, on
-every `--hwaccel` backend, so a resolved hardware encoder means full-CPU
-decode running concurrently with the GPU/QSV/NVENC encode block — the most
-demanding combination thermally. smelt logs a `resource profile` warning
-whenever this combination resolves (including on `--dry-run`, before any file
-is touched), and `--decode-threads N` caps the decoder's own thread count
-(unlike `--ffmpeg-arg -threads N`, which lands after `-i` and only constrains
-the encoder).
+The first remedy is hardware decode. When a hardware encoder resolves on
+`nvenc`, `qsv`, or `vaapi`, smelt also decodes on that *same device* for
+every file a per-file probe confirms is decodable there (`--hwdecode auto`,
+the default): the whole video pipeline stays in device memory and the
+CPU-heavy decode disappears entirely. Files the device can't decode — and
+everything with `--hwdecode off`, or on the encode-only `amf`/`videotoolbox`
+backends — fall back to software decode, and that combination (full-CPU
+decode running concurrently with the GPU/QSV/NVENC encode block) is the most
+demanding thermally. smelt logs a `resource profile` warning whenever it
+resolves (including on `--dry-run`, before any file is touched). For those
+software-decoded files the fallback remedy is `--decode-threads N`, which
+caps the decoder's own thread count (unlike `--ffmpeg-arg -threads N`, which
+lands after `-i` and only constrains the encoder); it is omitted from the
+command while hardware decode is active.
+
+With hardware decode active, GPU memory becomes the constrained resource
+instead: many concurrent 4K surfaces can exhaust VRAM (or hit NVDEC session
+limits on consumer GeForce cards), which surfaces as per-file failures that
+auto-retry in software — if that happens at scale, lower `--workers`.
 
 Beyond that, smelt has no CPU/thermal governor of its own, on any platform —
-`--decode-threads` and `--workers` are the two levers smelt itself gives you;
+`--hwdecode`, `--decode-threads`, and `--workers` are the levers smelt itself
+gives you;
 everything past that is OS-level throttling, and which tool that means
 depends on what you're running:
 
@@ -215,10 +230,12 @@ nice -n 10 smelt transcode --src /mnt/media --decode-threads 2
 start /low /wait smelt transcode --src D:\media --decode-threads 2
 ```
 
-The `resource profile` warning itself only ever suggests `--decode-threads`/
-`--workers` unconditionally, since those are the only levers guaranteed to
-exist everywhere smelt runs; it adds the `systemd-run` example on top only
-when `systemd-run` is actually found on `$PATH`.
+The `resource profile` warning itself leads with the applicable remedy
+(remove `--hwdecode off`, or a note that the source isn't hw-decodable on the
+resolved backend), then suggests `--decode-threads`/`--workers`
+unconditionally, since those are the only levers guaranteed to exist
+everywhere smelt runs; it adds the `systemd-run` example on top only when
+`systemd-run` is actually found on `$PATH`.
 
 If a run needs to be stopped, prefer `Ctrl-C`/`q` (in the TUI) or `SIGTERM`
 over externally `SIGKILL`-ing the `smelt` process itself. smelt's own
