@@ -38,6 +38,14 @@ type EncodeSpec struct {
 	SubtitleMode  string   // "copy" (default) | "drop"; controls subtitle stream handling
 	DecodeThreads int      // 0 = ffmpeg default; caps the decoder's thread count (pre -i, unlike --ffmpeg-arg)
 	ExtraArgs     []string // raw passthrough args (--ffmpeg-arg / profile extra_args)
+
+	// DecodeBackend selects hardware decode: "" = software decode; otherwise it
+	// must equal Backend (same-device invariant — decode happens on the exact
+	// device the encoder uses; frames never cross a device boundary).
+	DecodeBackend string
+	// SourceBitDepth is 10 for 10-bit sources riding the hardware pipeline
+	// (drives p010 upload and the encoder's main10 profile flag); 0/8 otherwise.
+	SourceBitDepth int
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -159,11 +167,23 @@ func videoEncoder(spec EncodeSpec) string {
 	return codecFlag(spec.Codec)
 }
 
-// preInputArgs are flags that must precede -i (e.g. selecting the hardware
-// device, capping decoder threads). smelt does not accelerate decode — it is
-// always software, even when Backend selects a hardware encoder — so
-// DecodeThreads is the only lever for capping that side of the pipeline.
+// preInputArgs are flags that must precede -i: the hardware decode block, the
+// encoder's device selection, and the decoder thread cap. With hardware decode
+// active (DecodeBackend != "", always equal to Backend), decoded frames stay
+// in device memory and feed the encoder directly; -threads is pointless there
+// and omitted for a clean command line — it still applies on every
+// software-decode path.
 func preInputArgs(spec EncodeSpec) []string {
+	if spec.DecodeBackend != "" {
+		switch spec.DecodeBackend {
+		case "vaapi":
+			return []string{"-vaapi_device", vaapiDevice(), "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"}
+		case "qsv":
+			return []string{"-init_hw_device", "qsv=qsv:hw_any", "-hwaccel", "qsv", "-hwaccel_output_format", "qsv"}
+		case "nvenc":
+			return []string{"-hwaccel", "cuda", "-hwaccel_output_format", "cuda"}
+		}
+	}
 	var args []string
 	if spec.DecodeThreads > 0 {
 		args = append(args, "-threads", strconv.Itoa(spec.DecodeThreads))
@@ -178,9 +198,29 @@ func preInputArgs(spec EncodeSpec) []string {
 }
 
 // videoFilterArgs uploads frames to GPU memory where the backend requires it.
+// With hardware decode, frames are already device surfaces — no filter. The
+// software-decode VAAPI upload is bit-depth aware: nv12 (8-bit) / p010
+// (10-bit), so 10-bit sources are not silently flattened to 8-bit.
 func videoFilterArgs(spec EncodeSpec) []string {
+	if spec.DecodeBackend != "" {
+		return nil
+	}
 	if spec.Backend == "vaapi" {
+		if spec.SourceBitDepth == 10 {
+			return []string{"-vf", "format=p010,hwupload"}
+		}
 		return []string{"-vf", "format=nv12,hwupload"}
+	}
+	return nil
+}
+
+// tenBitProfileArgs is the per-encoder-family flag that selects a 10-bit
+// encode profile, keyed by the probed truth: hevc encoders need an explicit
+// main10; av1 hardware encoders take 10-bit input with no -profile:v at all
+// (validated on av1_nvenc / av1_qsv / av1_vaapi).
+func tenBitProfileArgs(encoder string) []string {
+	if strings.HasPrefix(encoder, "hevc_") {
+		return []string{"-profile:v", "main10"}
 	}
 	return nil
 }
@@ -224,6 +264,9 @@ func rateControlArgs(spec EncodeSpec) []string {
 		if enc == "libvpx-vp9" {
 			args = append(args, "-b:v", "0")
 		}
+	}
+	if spec.Backend != "" && spec.SourceBitDepth == 10 {
+		args = append(args, tenBitProfileArgs(enc)...)
 	}
 	if p := encoderPreset(spec.Backend, enc, spec.Preset); p != "" {
 		args = append(args, "-preset", p)
