@@ -1337,41 +1337,13 @@ is set — see [`smelt do`](#smelt-do)).
 
 ## Environment Variables
 
-Every flag can be set via an environment variable prefixed with `SMELT_`, using
-uppercase and underscores. Flag precedence (highest to lowest):
+`SMELT_`-prefixed environment variables are **not currently wired up** —
+despite being referenced by older docs, no flag or config key can be set this
+way today. Flag precedence is just:
 
 1. CLI flag
-2. Environment variable
-3. `config.yaml` value
-4. Built-in default
+2. `config.yaml` value
+3. Built-in default
 
-| Flag | Env var |
-|---|---|
-| `--assume-yes` | `SMELT_ASSUME_YES` |
-| `--db` | `SMELT_DB` |
-| `--log-level` | `SMELT_LOG_LEVEL` |
-| `--log-format` | `SMELT_LOG_FORMAT` |
-| `--src` | `SMELT_SRC` |
-| `--ext` | `SMELT_EXT` |
-| `--hwaccel` | `SMELT_HWACCEL` |
-| `--force` | `SMELT_FORCE` |
-| `--suffix` | `SMELT_SUFFIX` |
-| `--to` | `SMELT_TO` |
-| `--codec` | `SMELT_CODEC` |
-| `--crf` | `SMELT_CRF` |
-| `--preset` | `SMELT_PRESET` |
-| `--audio-codec` | `SMELT_AUDIO_CODEC` |
-| `--audio-bitrate` | `SMELT_AUDIO_BITRATE` |
-| `--subs` | `SMELT_SUBS` |
-| `--workers` | `SMELT_WORKERS` |
-| `--inplace` | `SMELT_INPLACE` |
-| `--skip-hardlinked` | `SMELT_SKIP_HARDLINKED` |
-| `--skip-source-codec` | `SMELT_SKIP_SOURCE_CODEC` |
-| `--output-dir` | `SMELT_OUTPUT_DIR` |
-| `--profile` | `SMELT_PROFILE` |
-
-Example:
-
-```bash
-SMELT_WORKERS=16 SMELT_CODEC=av1 smelt transcode --src /mnt/media
-```
+See [`internal/config`](../internal/config) / `cmd/root.go`'s `bindTranscodeFlags`
+if you're looking to add real env var support; it isn't there yet.
