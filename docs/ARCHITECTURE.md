@@ -19,6 +19,11 @@ smelt/
 │   ├── history.go           `smelt history` — query the SQLite history DB
 │   ├── workflow.go          `smelt workflow` — emits a schedulable shell script
 │   ├── watch.go             `smelt watch` — polls --src on a timer, reusing scanner+worker.Plan each pass
+│   ├── each.go              `smelt each` — scans + emits one job row + one path per line (script primitive)
+│   ├── match.go             `smelt match` — evaluates one Cond against a file, exit 0/1 (script primitive)
+│   ├── do.go                `smelt do` — applies transcode/check to a single file, DB-tracked (script primitive)
+│   ├── finishrun.go         `smelt finish-run` — reconciles + closes a tracked run (script primitive)
+│   ├── serve.go             `smelt serve` — starts the HTTP API server (internal/server)
 │   ├── config.go            `smelt config init` — writes starter config.yaml
 │   └── version.go           `smelt version` — prints build metadata
 └── internal/                All business logic; not importable outside the module
@@ -28,16 +33,22 @@ smelt/
     │   ├── scanner.go       Scan() — filepath.WalkDir → []MediaFile (path/size/mtime/mode/links)
     │   └── links_{unix,other}.go  hardlink-count helper (build-tagged)
     ├── db/
-    │   └── db.go            Open(WAL) — Insert/IsDone/Recent; Record struct
+    │   └── db.go            Open(WAL) — full state plane: transcodes, runs, jobs, programs tables + query API
     ├── ffmpeg/
     │   ├── runner.go        Run(EncodeSpec) — exec wrapper, progress parsing, typed errors
     │   ├── accel.go         ResolveEncoder() — functional HW-encoder probe + fallback
     │   └── accel_{linux,darwin,windows}.go  per-GOOS hwPriority + vaapiDevice
     ├── worker/
-    │   ├── pool.go          Pool — sequential dispatch, Run() + RunWithCallbacks(); DB recording
+    │   ├── pool.go          Pool — sequential dispatch, Run() + RunWithCallbacks() + RunTracked(); DB recording
     │   └── gate.go          pausable dispatch gate (TogglePause/Paused)
     ├── workflow/
-    │   └── workflow.go      Script() — render a transcode job as a shell script
+    │   ├── workflow.go      Script() — render a single `smelt transcode` invocation as a shell script
+    │   └── program.go       Program/Rule/Cond/Action IR + Render()/Parse()/ParseRule() — per-file decision pipelines
+    ├── server/
+    │   ├── server.go        Server — http.ServeMux wiring, Start(addr)
+    │   ├── handlers.go      Program/run CRUD + trigger/cancel HTTP handlers, JSON (de)serialization
+    │   ├── exec.go          triggerRun() — renders a Program to a script, execs it as a tracked subprocess
+    │   └── exec_{unix,windows}.go  per-GOOS process-group setup for clean cancellation (SIGTERM the group on unix)
     └── tui/
         ├── model.go         bubbletea Model — editable pre-flight, Init/Update/View
         ├── progress.go      Per-file progress bar helpers
@@ -51,9 +62,11 @@ smelt/
 | `cmd` | CLI surface, flag/viper wiring, DB open/close | Any transcoding or scanning logic |
 | `internal/config` | `Config` struct, viper deserialization | Flag definition, file I/O |
 | `internal/scanner` | Directory walk, extension/permission/mtime collection | ffmpeg, workers, config |
-| `internal/db` | SQLite WAL database, Record insert/query, DefaultPath | Business logic, config |
+| `internal/db` | SQLite WAL database, Record insert/query, DefaultPath, runs/jobs/programs tables | Business logic, config |
 | `internal/ffmpeg` | ffmpeg/ffprobe process lifecycle, HW probe, progress parsing | Concurrency, file routing |
 | `internal/worker` | Semaphore pool, job dispatch, DB recording, result aggregation | ffmpeg args, TUI state |
+| `internal/workflow` | Program IR, shell-script rendering/parsing | HTTP, process execution |
+| `internal/server` | HTTP routing, program storage via `internal/db`, subprocess lifecycle | Transcoding logic, script IR |
 | `internal/tui` | bubbletea model, render, keybindings | Transcoding logic, scanner |
 
 ---
@@ -291,3 +304,58 @@ tui.Model.Update(msg)
 The `listenForEvent` pattern is safe because the events channel is buffered
 (capacity = `len(files)*4 + 4`), so worker goroutines never block on sends
 even if the TUI event loop is momentarily busy.
+
+---
+
+## HTTP API (`smelt serve`)
+
+`smelt serve` (`internal/server`) exposes the SQLite history DB and the
+per-file decision engine (`internal/workflow`'s `Program` IR) over HTTP for
+the dashboard WebUI. There is no separate execution engine behind the API —
+every run is the same "render a script, exec it as a subprocess" model
+`smelt workflow` uses for cron, just triggered over HTTP instead of a
+crontab line:
+
+```
+POST /api/programs/{id}/run
+      │
+      ▼
+handlers.go: handleRunProgram
+      │  load Program{} from DB (db.GetProgram)
+      │  generate run_id (uuid)
+      ▼
+exec.go: triggerRun(runID, program)
+      │
+      │  workflow.Render(program, Options{Binary: <this executable>,
+      │                             DBSet: true, DBPath: <server's --db>})
+      │      ── every each/do/finish-run invocation in the rendered
+      │         script gets an explicit --db flag equal to the path the
+      │         server itself opened; without this the subprocess falls
+      │         back to db.DefaultPath() and the server would trigger
+      │         runs it can never see through its own /api/runs.
+      ▼
+  write script to <scripts-dir>/smelt-<run_id>.sh
+  exec.Command("sh", scriptPath), SMELT_RUN_ID=<run_id>, stdout/stderr → <script>.log
+      │  s.procs.Store(runID, cmd.Process)   ← tracked for cancellation
+      ▼
+  script runs: smelt each | while … smelt match … smelt do … done; smelt finish-run
+      │  each spawned smelt subcommand uses the inherited --db to write
+      │  runs/jobs rows the server's own DB handle can read back
+      ▼
+  GET /api/runs/{id}  (polled by the dashboard every ~2s while running)
+      reads the same runs/jobs rows via internal/db, independent of whether
+      the subprocess is still alive
+
+  DELETE /api/runs/{id}
+      looks up s.procs[runID] and sends SIGTERM to the process group
+      (setSysProcAttr / exec_unix.go), so cancelling the parent `sh` also
+      kills any in-flight ffmpeg child; 409 if no live process is tracked
+      (already finished, or the server restarted and lost the in-memory map)
+```
+
+Programs themselves (`POST/GET/PUT/DELETE /api/programs`) are plain CRUD
+against `internal/db`'s `programs` table — `workflow.Rule`/`Cond`/`Action`
+carry `json` tags matching the wire format documented in `docs/CLI.md`'s API
+reference (`when`/`do`/`field`/`op`/`value`/`cmd`/`args`), so a program
+fetched from the API round-trips through the same JSON shape it was created
+with.

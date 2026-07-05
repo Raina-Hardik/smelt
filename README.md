@@ -23,6 +23,7 @@ everything — fast, observable, and cancellable.
 - **Named profiles** — define `web`, `archive`, and custom codec/CRF/preset combinations in `config.yaml`
 - **Workflows** — `smelt workflow` emits a schedulable, flock-guarded shell script (cron-friendly)
 - **Continuous watch** — `smelt watch` polls a directory on a timer and transcodes only new or changed files, using the same skip logic as a plain `transcode` run
+- **HTTP API** — `smelt serve` exposes per-file decision programs, run triggering, and live progress over REST for a dashboard WebUI
 - **Dry-run mode** — inspect the full transcode plan without touching any file
 - **In-place replacement** — atomically replaces originals after a confirmed successful transcode
 - **Context-aware cancellation** — Ctrl+C / `q` cleanly kills all in-flight ffmpeg processes and removes partial output
@@ -98,9 +99,39 @@ smelt workflow --src /mnt/media --inplace -o nightly.sh --schedule "0 3 * * *"
 # Watch a directory continuously, transcoding new files every 5 minutes
 smelt watch --src /mnt/media --codec h265 --interval 5m
 
+# Start the HTTP API for a dashboard WebUI (binds to localhost only by default)
+smelt serve --addr 127.0.0.1:7700
+
 # Generate a starter config.yaml
 smelt config init
 ```
+
+---
+
+## Docker
+
+Every tagged release publishes a multi-arch (`linux/amd64`, `linux/arm64`)
+image to GHCR, built on Alpine with `ffmpeg` preinstalled:
+
+```bash
+docker pull ghcr.io/raina-hardik/smelt:latest
+
+# One-shot transcode: mount the media directory, override the entrypoint's
+# implicit subcommand with your own
+docker run --rm -v /mnt/media:/media ghcr.io/raina-hardik/smelt:latest \
+    transcode --src /media --codec h265 --inplace -y
+
+# Run smelt serve for the dashboard WebUI: publish the port, and persist the
+# history DB and rendered program scripts outside the container
+docker run -d --name smelt-serve -p 7700:7700 \
+    -v smelt-data:/data \
+    ghcr.io/raina-hardik/smelt:latest \
+    serve --addr 0.0.0.0:7700 --db /data/history.db --scripts-dir /data/scripts
+```
+
+The image has no hardware-acceleration device passthrough configured by
+default; add `--device /dev/dri` (VAAPI) or the equivalent for your GPU
+backend if you need `--hwaccel` inside the container.
 
 ---
 
