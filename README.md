@@ -311,3 +311,6 @@ ISC — see [LICENSE](LICENSE).
 Initial project scaffolding generated using Claude Sonnet 4.6.
 - `#84e9215` docs: add full API-first surface documentation and lock CLI
 - `#6ce437f` feat: initial project scaffold
+
+Community health files generated using Claude Sonnet 5 (Claude Code).
+- `#efceccd` docs: add code of conduct, PR template, and issue templates
