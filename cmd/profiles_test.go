@@ -62,6 +62,20 @@ func TestProfilesShowExpandsFlags(t *testing.T) {
 	}
 }
 
+func TestProfileFlagCompletion(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset() })
+
+	// cobra's hidden __complete command drives shell completion; exercising it
+	// verifies the --profile completion func is wired to the profile registry.
+	out := runProfilesCmd(t, "__complete", "transcode", "--profile", "")
+	for _, name := range []string{"web", "archive", "av1"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("--profile completion missing %q\n%s", name, out)
+		}
+	}
+}
+
 func TestProfilesShowUnknownErrors(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(func() { viper.Reset() })

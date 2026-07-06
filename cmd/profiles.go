@@ -38,6 +38,12 @@ Explicit flags on the command line still override these.`,
 	Example: `  smelt profiles show web
   smelt profiles show archive`,
 	Args: cobra.ExactArgs(1),
+	ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return config.ProfileNames(), cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: runProfilesShow,
 }
 

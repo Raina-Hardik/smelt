@@ -90,7 +90,9 @@ expressible from the CLI alone, so a profile can never introduce behaviour the
 | `mobile` | `--codec h264 --crf 26 --preset fast --audio-codec aac --audio-bitrate 96k --to mp4 --ffmpeg-arg -vf --ffmpeg-arg scale=-2:720 --ffmpeg-arg -movflags --ffmpeg-arg +faststart` |
 
 Run `smelt profiles` to list every available profile (built-in and configured)
-and `smelt profiles show <name>` to print the exact flags one expands to.
+and `smelt profiles show <name>` to print the exact flags one expands to. With
+shell completion installed (`smelt completion`), `--profile` and `smelt profiles
+show` tab-complete profile names.
 
 **User-defined profiles** live under the `profiles` section of `config.yaml`.
 Each key mirrors a `transcode.*` key:
