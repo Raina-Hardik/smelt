@@ -762,7 +762,13 @@ func (m Model) preflightView() string {
 	b.WriteString(theme.Title.Render("⚡ smelt — configure"))
 	b.WriteString("\n\n")
 	b.WriteString(static("src", fmt.Sprintf("%s  (%d %s)", m.cfg.Src, len(m.files), files)) + "\n")
-	b.WriteString(static("output", m.outputSummary()) + "\n\n")
+	b.WriteString(static("output", m.outputSummary()) + "\n")
+	// A profile pre-fills the editable fields below; name it so the operator
+	// knows why the settings start where they do (fields stay fully editable).
+	if m.cfg.Profile != "" {
+		b.WriteString(static("profile", m.cfg.Profile+"  (edits below override it)") + "\n")
+	}
+	b.WriteString("\n")
 	b.WriteString(edit(fCodec, "codec", m.cfg.Codec, "") + "\n")
 	b.WriteString(edit(fCRF, "crf", strconv.Itoa(m.cfg.CRF), "") + "\n")
 	b.WriteString(edit(fPreset, "preset", preset, "") + "\n")
