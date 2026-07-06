@@ -313,4 +313,4 @@ Initial project scaffolding generated using Claude Sonnet 4.6.
 - `#6ce437f` feat: initial project scaffold
 
 Community health files generated using Claude Sonnet 5 (Claude Code).
-- `#efceccd` docs: add code of conduct, PR template, and issue templates
+- `#910c157` docs: add code of conduct, PR template, and issue templates
