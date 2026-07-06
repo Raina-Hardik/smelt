@@ -149,29 +149,42 @@ func Load() *Config {
 	}
 }
 
-// applyProfile loads the named --profile from the `profiles` map and registers
-// its codec/crf/preset as viper *defaults*. Because a bound flag only wins in
-// viper when explicitly changed, this gives the intended precedence: explicit
-// flag > profile > built-in default. Returns the profile's extra_args.
+// applyProfile resolves the named --profile (built-in ∪ config.yaml) and
+// registers each field it sets as a viper *default*. Because a bound flag only
+// wins in viper when explicitly changed, this gives the intended precedence:
+// explicit flag > profile > built-in default. Returns the profile's extra_args
+// so Load can prepend them ahead of any CLI --ffmpeg-arg values.
 func applyProfile() []string {
 	name := viper.GetString("transcode.profile")
 	if name == "" {
 		return nil
 	}
-	base := "profiles." + name
-	if !viper.IsSet(base) {
+	p, ok := ResolveProfile(name)
+	if !ok {
 		return nil // unknown profile is reported by Config.Validate
 	}
-	if v := viper.GetString(base + ".codec"); v != "" {
-		viper.SetDefault("transcode.codec", v)
+	if p.Codec != "" {
+		viper.SetDefault("transcode.codec", p.Codec)
 	}
-	if viper.IsSet(base + ".crf") {
-		viper.SetDefault("transcode.crf", viper.GetInt(base+".crf"))
+	if p.CRF != nil {
+		viper.SetDefault("transcode.crf", *p.CRF)
 	}
-	if v := viper.GetString(base + ".preset"); v != "" {
-		viper.SetDefault("transcode.preset", v)
+	if p.Preset != "" {
+		viper.SetDefault("transcode.preset", p.Preset)
 	}
-	return viper.GetStringSlice(base + ".extra_args")
+	if p.AudioCodec != "" {
+		viper.SetDefault("transcode.audio_codec", p.AudioCodec)
+	}
+	if p.AudioBitrate != "" {
+		viper.SetDefault("transcode.audio_bitrate", p.AudioBitrate)
+	}
+	if p.Container != "" {
+		viper.SetDefault("transcode.to", p.Container)
+	}
+	if p.Subs != "" {
+		viper.SetDefault("transcode.subs", p.Subs)
+	}
+	return p.ExtraArgs
 }
 
 // Validate checks for mutually inconsistent configuration.
@@ -180,10 +193,13 @@ func (c *Config) Validate() error {
 		return errors.New("--inplace and --output-dir are mutually exclusive")
 	}
 	if c.InPlace && c.Container != "" {
+		if c.Profile != "" {
+			return fmt.Errorf("--inplace and --to (container change) are mutually exclusive; profile %q sets --to %s (clear it with --to \"\" or drop --inplace)", c.Profile, c.Container)
+		}
 		return errors.New("--inplace and --to (container change) are mutually exclusive")
 	}
-	if c.Profile != "" && !viper.IsSet("profiles."+c.Profile) {
-		return fmt.Errorf("unknown profile %q", c.Profile)
+	if c.Profile != "" && !IsKnownProfile(c.Profile) {
+		return fmt.Errorf("unknown profile %q; run `smelt profiles` to list built-in and configured profiles", c.Profile)
 	}
 	if !ffmpeg.IsKnownCodec(c.Codec) {
 		return fmt.Errorf("unknown codec %q; valid: %s", c.Codec, strings.Join(ffmpeg.KnownCodecs(), ", "))
