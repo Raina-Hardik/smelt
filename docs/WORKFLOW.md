@@ -244,9 +244,15 @@ fails later with `Error: unknown flag: --width-le`.
 
 | Action | Description |
 |---|---|
-| `transcode [flags]` | Transcode the file. Accepts all `smelt transcode` encode flags. |
+| `transcode [flags]` | Transcode the file. Accepts all `smelt transcode` encode flags, including `--profile <name>`. |
 | `skip` | Do nothing. Use as a catch-all to mark unmatched files as explicitly skipped. |
 | `check` | Run a health probe on the file. |
+
+A `transcode` action can name a profile instead of spelling out each flag —
+`do transcode --profile archive`. Built-in profiles (`web`, `web-hevc`,
+`archive`, `av1`, `mobile`) resolve with no config file, so a program script
+stays self-contained; explicit flags after `--profile` still override it. Run
+`smelt profiles` to list them.
 
 ### Examples
 

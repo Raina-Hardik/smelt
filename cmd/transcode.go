@@ -221,7 +221,7 @@ func addTranscodeFlags(cmd *cobra.Command) {
 	)
 	cmd.Flags().String(
 		"profile", "",
-		"named profile preset from config; explicit flags still override it",
+		"named profile: a preconfigured flag set (codec, crf, preset, audio, container, extra ffmpeg args). Built-ins: web, web-hevc, archive, av1, mobile; config.yaml profiles override same-named built-ins. Explicit flags still win. See `smelt profiles`",
 	)
 	cmd.Flags().StringArray(
 		"ffmpeg-arg", nil,

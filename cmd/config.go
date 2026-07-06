@@ -37,14 +37,13 @@ transcode:
     - mp4
     - avi
 
-  # Target video codec: h264 | h265 | av1 | vp9
-  codec: h265
-
-  # Constant rate factor, 0-51. Lower = higher quality, larger file.
-  crf: 23
-
-  # ffmpeg encoding preset: ultrafast | fast | medium | slow | veryslow
-  preset: medium
+  # Encode settings. Left commented so a --profile drives them; uncomment to
+  # pin a value (a value set here outranks any --profile, per the precedence
+  # below). Shown values are the built-in defaults.
+  #
+  # codec: h265     # target video codec: h264 | h265 | av1 | vp9
+  # crf: 23         # constant rate factor 0-51; lower = higher quality
+  # preset: medium  # ultrafast | fast | medium | slow | veryslow
 
   # Replace original file after a confirmed successful transcode.
   # WARNING: the original is unrecoverable after this operation.
@@ -59,30 +58,29 @@ transcode:
   suffix: ".smelt"
 
 # Named profiles — apply with: smelt transcode --profile <name>
-# Profile values override codec, crf, and preset when active.
+# Built-in profiles (web, web-hevc, archive, av1, mobile) ship in the binary and
+# need no config. Run ` + "`smelt profiles`" + ` to list them and
+# ` + "`smelt profiles show <name>`" + ` to see the exact flags each expands to. A
+# profile below of the same name overrides the built-in field-by-field; a new
+# name adds a profile. Every key mirrors a transcode.* flag: codec, crf, preset,
+# audio_codec, audio_bitrate, to, subs, extra_args.
 profiles:
+  # Customise the built-in web profile: keep its audio/container/faststart,
+  # just raise the quality (lower crf).
   web:
-    codec: h264
-    crf: 28
-    preset: fast
-    extra_args:
-      - "-movflags"
-      - "+faststart"
+    crf: 20
 
-  archive:
+  # A profile of your own.
+  hevc-1080p:
     codec: h265
-    crf: 18
+    crf: 22
     preset: slow
-
-  mobile:
-    codec: h264
-    crf: 30
-    preset: fast
+    audio_codec: aac
+    audio_bitrate: 160k
+    to: mkv
     extra_args:
       - "-vf"
-      - "scale=1280:-2"
-      - "-movflags"
-      - "+faststart"
+      - "scale=-2:1080"
 `
 
 var configCmd = &cobra.Command{

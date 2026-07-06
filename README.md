@@ -20,7 +20,7 @@ everything — fast, observable, and cancellable.
 - **Container conversion** — retarget the container with `--to mp4|mkv|webm` (mp4 gets faststart + hvc1)
 - **Idempotent re-runs** — skips files already produced, or (with `--inplace`) files already in the target codec
 - **Hardlink-aware** — `--skip-hardlinked` spares files hardlinked elsewhere (e.g. a seedbox/ARR setup)
-- **Named profiles** — define `web`, `archive`, and custom codec/CRF/preset combinations in `config.yaml`
+- **Profiles** — ready-made flag sets (`web`, `web-hevc`, `archive`, `av1`, `mobile`) built into the binary; `smelt profiles` lists them, `smelt profiles show <name>` prints the exact flags each expands to, and `config.yaml` can override a built-in or add your own
 - **Workflows** — `smelt workflow` emits a schedulable, flock-guarded shell script (cron-friendly)
 - **Continuous watch** — `smelt watch` polls a directory on a timer and transcodes only new or changed files, using the same skip logic as a plain `transcode` run
 - **HTTP API** — `smelt serve` exposes per-file decision programs, run triggering, and live progress over REST for a dashboard WebUI
@@ -87,7 +87,7 @@ smelt transcode --src /mnt/media --codec h265 --to mp4
 # Replace originals in-place; already-h265 files are skipped automatically
 smelt transcode --src /mnt/media --inplace --codec h265 --skip-hardlinked
 
-# Use a named profile from config.yaml
+# Use a built-in profile (no config needed); `smelt profiles` lists them all
 smelt transcode --src /mnt/media --profile archive
 
 # Launch the interactive TUI (editable pre-flight, live progress, p to pause)
@@ -156,16 +156,17 @@ transcode:
   audio_codec: copy
   inplace: false
 
+# web, web-hevc, archive, av1, mobile are built in — no config needed.
+# Define a profile here to override a built-in field-by-field, or add your own:
 profiles:
   web:
-    codec: h264
-    crf: 28
-    preset: fast
-    extra_args: ["-movflags", "+faststart"]
-  archive:
+    crf: 20            # keep the built-in web profile, just raise quality
+  hevc-1080p:          # a profile of your own; keys mirror transcode.* flags
     codec: h265
-    crf: 18
+    crf: 22
     preset: slow
+    to: mkv
+    extra_args: ["-vf", "scale=-2:1080"]
 ```
 
 Most config keys can also be set via a `SMELT_`-prefixed environment variable

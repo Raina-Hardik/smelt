@@ -42,6 +42,7 @@ Available Commands:
   help        Help about any command
   history     Show recent transcode history from the processed-file database
   match       Test per-file conditions; exits 0 if all match, 1 if not
+  profiles    List available transcode profiles
   serve       Start the smelt HTTP API server
   transcode   Transcode media files in a directory
   tui         Launch the interactive transcoding TUI
@@ -178,7 +179,7 @@ Global Flags:
 | `--inplace` | bool | `false` | After a successful transcode, atomically replace the original file with the output. Files already in the target codec are skipped (probed with `ffprobe`; override with `--force`). The original is unrecoverable after this operation. Prompts for confirmation unless `-y`. Mutually exclusive with `--output-dir` and `--to`. |
 | `--output-dir` | string | _(alongside source)_ | Write all output files into this directory, mirroring the relative path structure from `--src` and keeping the original filename. Created if missing. Mutually exclusive with `--inplace`. |
 | `--preset` | string | `medium` | Encoding preset (speed/quality trade-off). Given an x264-style name (`ultrafast`…`veryslow`), it is normalized into the resolved encoder's namespace: NVENC → `fast`/`medium`/`slow` (or pass `p1`–`p7`), QSV → `veryfast`…`veryslow`, SVT-AV1 → a number `0`–`13`. Ignored for VP9/VAAPI/AMF/VideoToolbox. |
-| `--profile` | string | _(none)_ | Name of a profile defined in the `profiles` section of `config.yaml`. Acts as a preset for `--codec`, `--crf`, `--preset`, and `extra_args`; explicit flags still take precedence over it. |
+| `--profile` | string | _(none)_ | Named profile: a preconfigured set of transcode flags (`--codec`, `--crf`, `--preset`, `--audio-codec`, `--audio-bitrate`, `--to`, `--subs`, and repeatable `--ffmpeg-arg`). Built-in profiles (`web`, `web-hevc`, `archive`, `av1`, `mobile`) ship in the binary and need no config file; a profile of the same name in the `profiles` section of `config.yaml` overrides the built-in field-by-field. Explicit flags still take precedence over the profile. Run `smelt profiles` to list them and `smelt profiles show <name>` to see the exact flags one expands to. |
 | `--skip-hardlinked` | bool | `false` | With `--inplace`, skip files whose hardlink count is >1. Transcoding replaces the inode, breaking the hardlink and doubling disk usage — useful for ARR/seedbox setups. Overridden by `--force`. No effect without `--inplace`. |
 | `--skip-source-codec` | stringArray | _(none)_ | Skip files whose current video codec matches any entry in this list. Repeatable. Useful for protecting already-optimal files (e.g. `--skip-source-codec av1` never downgrades AV1). |
 | `--src` | string | `.` | Root directory to scan recursively for media files. |
@@ -186,6 +187,97 @@ Global Flags:
 | `--suffix` | string | `.smelt` | Filename suffix for outputs written alongside the source (`<name><suffix><ext>`). Ignored for `--inplace` and `--output-dir`. |
 | `--to` | string | _(keep source)_ | Target output container/format, e.g. `mp4`, `mkv`, `webm`. Changes only the container (extension/muxer), not the codec. For mp4 it adds `+faststart` and tags HEVC as `hvc1`. Mutually exclusive with `--inplace`. |
 | `--workers` | int | `0` | Maximum number of simultaneous ffmpeg processes. `0` means `runtime.NumCPU()`. Note this only bounds *how many files* run concurrently — it has no effect on a single large file, where one ffmpeg process is free to use all available cores/threads on both decode and encode. For a lone huge source, use `--decode-threads`, `--preset`, or an OS-level throttle (see [Running politely on constrained hardware](../README.md#running-politely-on-constrained-hardware)). |
+
+---
+
+## `smelt profiles`
+
+List the transcode profiles available to `--profile`, and show the exact flags
+any one expands to.
+
+A profile is a composable, preconfigured set of `smelt transcode` flags —
+nothing a profile encodes is anything the CLI can't express on its own.
+Built-in profiles ship in the binary and work with no config file; a profile of
+the same name under the `profiles` section of `config.yaml` overrides the
+built-in field-by-field.
+
+```
+List the transcode profiles available to --profile.
+
+A profile is a composable, preconfigured set of transcode flags. Built-in
+profiles ship in the binary and work with no config file; you can define your
+own (or override a built-in of the same name, field by field) under the
+'profiles' section of config.yaml.
+
+With no arguments, lists every profile. 'smelt profiles show <name>' prints the
+exact 'smelt transcode' flags that --profile <name> expands to.
+
+Usage:
+  smelt profiles [flags]
+  smelt profiles [command]
+
+Examples:
+  smelt profiles
+  smelt profiles show web
+  smelt transcode --src /mnt/media --profile archive
+
+Available Commands:
+  show        Show the flags a profile expands to
+
+Flags:
+  -h, --help   help for profiles
+```
+
+### Built-in profiles
+
+| Profile | Codec | CRF | What it's for |
+|---|---|---|---|
+| `web` | h264 | 23 | H.264 MP4 for broad browser/device compatibility (`+faststart`, AAC 160k). |
+| `web-hevc` | h265 | 26 | H.265 MP4, ~half the size of `web`; `hvc1` tag for Apple/Safari playback. |
+| `archive` | h265 | 18 | High-quality H.265 for long-term storage; audio kept untouched (`copy`). |
+| `av1` | av1 | 30 | AV1 for maximum compression; slow encode, smallest files (Opus 128k). |
+| `mobile` | h264 | 26 | 720p H.264 MP4 for phones/tablets; downscales (`-vf scale=-2:720`), AAC 96k. |
+
+Because a container-changing profile (`web`, `web-hevc`, `mobile`) sets `--to`,
+it is mutually exclusive with `--inplace`; clear it with `--to ""` if you need
+to encode in place with such a profile.
+
+### `smelt profiles show <name>`
+
+Print one profile's source (built-in or config), its description, and the exact
+`smelt transcode` flags `--profile <name>` injects. Explicit flags on the
+command line still override these.
+
+```
+$ smelt profiles show web
+profile: web
+source:  built-in
+summary: H.264 MP4 for broad browser/device compatibility (faststart).
+
+expands to:
+  smelt transcode --profile web
+
+equivalent explicit flags:
+  --codec h264 --crf 23 --preset fast --audio-codec aac --audio-bitrate 160k --to mp4 --ffmpeg-arg -movflags --ffmpeg-arg +faststart
+```
+
+```
+Print the details of one profile: its source (built-in or config), its
+description, and the exact 'smelt transcode' flags --profile <name> injects.
+Explicit flags on the command line still override these.
+
+Usage:
+  smelt profiles show <name> [flags]
+
+Examples:
+  smelt profiles show web
+  smelt profiles show archive
+
+Flags:
+  -h, --help   help for show
+```
+
+Exit codes: `2` when `<name>` is not a known profile.
 
 ---
 

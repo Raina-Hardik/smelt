@@ -50,17 +50,74 @@ transcode:
   decode_threads: 0           # int      — cap decoder thread count; 0 = ffmpeg default
   allow_hdr_loss: false       # bool     — required to transcode a detected Dolby Vision source
 
+# Profiles: preconfigured flag sets applied with `smelt transcode --profile <name>`.
+# Built-in profiles (web, web-hevc, archive, av1, mobile) ship in the binary and
+# need no config. Defining a profile here of the same name overrides the built-in
+# field-by-field; a new name adds a profile. Run `smelt profiles` to list them.
 profiles:
+  # Customise a built-in: keep web's audio/container/faststart, bump quality.
   web:
-    codec: h264
-    crf: 28
-    preset: fast
-    extra_args: ["-movflags", "+faststart"]
-  archive:
+    crf: 20
+  # A brand-new profile of your own.
+  hevc-1080p:
     codec: h265
-    crf: 18
+    crf: 22
     preset: slow
+    audio_codec: aac
+    audio_bitrate: 160k
+    to: mkv
+    extra_args: ["-vf", "scale=-2:1080"]
 ```
+
+---
+
+## Profiles
+
+A **profile** is a composable, preconfigured set of `smelt transcode` flags —
+and nothing more. `--profile <name>` expands to that flag set; explicit flags on
+the command line compose with and override it. Everything a profile encodes is
+expressible from the CLI alone, so a profile can never introduce behaviour the
+`--help` screen can't describe.
+
+**Built-in profiles** ship in the binary and work with no config file:
+
+| Profile | Expands to |
+|---|---|
+| `web` | `--codec h264 --crf 23 --preset fast --audio-codec aac --audio-bitrate 160k --to mp4 --ffmpeg-arg -movflags --ffmpeg-arg +faststart` |
+| `web-hevc` | `--codec h265 --crf 26 --preset medium --audio-codec aac --audio-bitrate 160k --to mp4 --ffmpeg-arg -tag:v --ffmpeg-arg hvc1 --ffmpeg-arg -movflags --ffmpeg-arg +faststart` |
+| `archive` | `--codec h265 --crf 18 --preset slow --audio-codec copy` |
+| `av1` | `--codec av1 --crf 30 --preset slow --audio-codec opus --audio-bitrate 128k` |
+| `mobile` | `--codec h264 --crf 26 --preset fast --audio-codec aac --audio-bitrate 96k --to mp4 --ffmpeg-arg -vf --ffmpeg-arg scale=-2:720 --ffmpeg-arg -movflags --ffmpeg-arg +faststart` |
+
+Run `smelt profiles` to list every available profile (built-in and configured)
+and `smelt profiles show <name>` to print the exact flags one expands to.
+
+**User-defined profiles** live under the `profiles` section of `config.yaml`.
+Each key mirrors a `transcode.*` key:
+
+| Profile key | Maps to flag | Notes |
+|---|---|---|
+| `codec` | `--codec` | |
+| `crf` | `--crf` | |
+| `preset` | `--preset` | |
+| `audio_codec` | `--audio-codec` | |
+| `audio_bitrate` | `--audio-bitrate` | |
+| `to` | `--to` | container-changing; conflicts with `--inplace` |
+| `subs` | `--subs` | |
+| `extra_args` | `--ffmpeg-arg` (repeatable) | prepended before any CLI `--ffmpeg-arg` |
+| `description` | _(shown in `smelt profiles`)_ | optional |
+
+Any key omitted from a profile is left unset — it does not override an explicit
+flag or the built-in default. A profile of the same **name** as a built-in
+overrides it **field-by-field**: keys you set win, keys you omit fall through to
+the built-in (except `extra_args`, which replaces the built-in list wholesale).
+
+**Precedence** (highest wins): explicit CLI flag → env var → profile → built-in
+default.
+
+**`--inplace` interaction:** a profile that sets `to` (`web`, `web-hevc`,
+`mobile`, or your own with `to:`) is mutually exclusive with `--inplace`. Clear
+it on the command line with `--to ""` if you must encode in place.
 
 ---
 
