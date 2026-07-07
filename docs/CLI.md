@@ -31,24 +31,32 @@ or a schedulable script via 'smelt workflow'.
 Usage:
   smelt [command]
 
-Available Commands:
+Core Commands:
+  transcode   Transcode media files in a directory
+  tui         Launch the interactive transcoding TUI
+  watch       Continuously scan a directory and transcode new or changed files
+  workflow    Generate a schedulable shell script for a transcode job
+
+Inspect Commands:
   check       Probe a directory for corrupt or unreadable media files
-  clean       Remove leftover .transcoded partial artifacts from interrupted runs
-  completion  Generate the autocompletion script for the specified shell
-  config      Manage smelt configuration
-  do          Apply a smelt subcommand to a single file
-  each        Emit matching file paths one per line
-  finish-run  Reconcile and close a tracked run in the history database
-  help        Help about any command
   history     Show recent transcode history from the processed-file database
   match       Test per-file conditions; exits 0 if all match, 1 if not
   profiles    List available transcode profiles
+
+Compose Commands:
+  do          Apply a smelt subcommand to a single file
+  each        Emit matching file paths one per line
+
+Manage Commands:
+  clean       Remove leftover .transcoded partial artifacts from interrupted runs
+  config      Manage smelt configuration
+  finish-run  Reconcile and close a tracked run in the history database
   serve       Start the smelt HTTP API server
-  transcode   Transcode media files in a directory
-  tui         Launch the interactive transcoding TUI
+
+Additional Commands:
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
   version     Print smelt version information
-  watch       Continuously scan a directory and transcode new or changed files
-  workflow    Generate a schedulable shell script for a transcode job
 
 Flags:
   -y, --assume-yes          skip confirmation prompts (assume yes) for destructive actions
