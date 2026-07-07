@@ -1,6 +1,9 @@
 package ffmpeg
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -200,5 +203,45 @@ func TestParseSpeed(t *testing.T) {
 	}
 	if _, ok := parseSpeed("no speed field on this line"); ok {
 		t.Error("expected no match on a line without speed=")
+	}
+}
+
+// TestScanCRLFHandlesLongCRStream reproduces the deadlock scenario: ffmpeg
+// writes progress updates separated by '\r' with no '\n' at all. The default
+// bufio.ScanLines split treats that as one unbroken token, which eventually
+// exceeds bufio.MaxScanTokenSize (64KB) and makes Scan fail with
+// bufio.ErrTooLong — silently, since the loop in Run never checked sc.Err().
+// scanCRLF must split on '\r' too, so every update is its own small token and
+// the scanner never overflows however long the stream runs.
+func TestScanCRLFHandlesLongCRStream(t *testing.T) {
+	var buf bytes.Buffer
+	const updates = 5000 // ~ 5000 * ~60 bytes >> 64KB with zero '\n' bytes
+	for i := 0; i < updates; i++ {
+		fmt.Fprintf(&buf, "frame=%5d fps= 24 q=28.0 size=  102400kB time=00:00:%02d.00 bitrate=1000.0kbits/s speed=1.00x\r", i, i%60)
+	}
+	if buf.Len() <= bufio.MaxScanTokenSize {
+		t.Fatalf("test input too small to exercise the bug: %d bytes", buf.Len())
+	}
+
+	sc := bufio.NewScanner(&buf)
+	sc.Split(scanCRLF)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	var tokens int
+	var sawTime bool
+	for sc.Scan() {
+		tokens++
+		if _, ok := parseTime(sc.Text()); ok {
+			sawTime = true
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scanner failed on a long \\r-delimited stream: %v", err)
+	}
+	if tokens != updates {
+		t.Errorf("got %d tokens, want %d", tokens, updates)
+	}
+	if !sawTime {
+		t.Error("expected at least one token to parse a time= field")
 	}
 }

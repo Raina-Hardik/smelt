@@ -2,8 +2,10 @@ package ffmpeg
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -89,6 +91,8 @@ func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(
 
 	var stderrBuf strings.Builder
 	sc := bufio.NewScanner(stderr)
+	sc.Split(scanCRLF)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
 		stderrBuf.WriteString(line)
@@ -114,17 +118,51 @@ func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(
 		}
 	}
 
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	scanErr := sc.Err()
+	if scanErr != nil {
+		// sc.Scan() gave up early (e.g. a still-oversized token). Drain
+		// whatever ffmpeg has left to write so it never blocks on a full
+		// stderr pipe before we reap it below.
+		_, _ = io.Copy(io.Discard, stderr)
+	}
+
+	waitErr := cmd.Wait()
+
+	if scanErr != nil {
+		return &OSError{FilePath: src, Err: fmt.Errorf("reading ffmpeg stderr: %w", scanErr)}
+	}
+
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			return &ExecError{
 				FilePath: src,
 				ExitCode: exitErr.ExitCode(),
 				Stderr:   stderrBuf.String(),
 			}
 		}
-		return &OSError{FilePath: src, Err: err}
+		return &OSError{FilePath: src, Err: waitErr}
 	}
 	return nil
+}
+
+// scanCRLF is bufio.ScanLines adapted to split on a bare '\r' as well as
+// '\n': ffmpeg rewrites its progress line in place using '\r' with no
+// trailing '\n', so the default split never terminates a token and it grows
+// until it exceeds bufio's max token size, at which point Scan stops
+// silently and the caller stops draining stderr — deadlocking ffmpeg on a
+// full pipe. Splitting on either byte turns each progress update into its
+// own small token.
+func scanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[0:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 func buildArgs(src, dst string, spec EncodeSpec) []string {
