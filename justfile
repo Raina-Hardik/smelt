@@ -13,10 +13,6 @@ _default:
 build:
     go build -ldflags="{{ldflags}}" -o smelt .
 
-# Build with the Scalar API docs UI mounted at /docs (dev only, not for release).
-build-dev:
-    go build -tags dev -ldflags="{{ldflags}}" -o smelt .
-
 # Run all tests.
 test:
     go test ./...
@@ -28,10 +24,6 @@ test-race:
 # Run tests including those that invoke real ffmpeg/ffprobe.
 test-integration:
     go test -tags integration ./...
-
-# Run dev-tagged tests (Scalar docs routes) — not exercised by plain `test`.
-test-dev:
-    go test -tags dev ./internal/server/...
 
 # Verbose test output.
 test-verbose:
@@ -54,13 +46,13 @@ generate-check: generate
     git diff --exit-code -- api/
 
 # Refresh the vendored Scalar docs-UI bundle (internal/server/scalar.standalone.min.js).
-# Bump the pinned version in the URL below and in docs_dev.go's comment together.
+# Bump the pinned version in the URL below and in docs.go's comment together.
 vendor-scalar:
     curl -fsSL https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.62.5/dist/browser/standalone.min.js \
         -o internal/server/scalar.standalone.min.js
 
-# Build, vet, and race-test (incl. dev-tagged) — the pre-PR gate.
-check: build vet test-race test-dev
+# Build, vet, and race-test — the pre-PR gate.
+check: build vet test-race
 
 # Full CI gate: everything in `check` plus lint and the generated-code drift check.
 ci: check lint generate-check

@@ -1,5 +1,3 @@
-//go:build dev
-
 package server
 
 import (
@@ -25,9 +23,8 @@ const docsHTML = `<!doctype html>
 </body>
 </html>`
 
-// registerDocs mounts the dev-only Scalar API reference UI at GET /docs,
-// backed by the vendored standalone bundle at GET /docs/scalar.js. Compiled
-// out of non-dev builds entirely (see docs_prod.go).
+// registerDocs mounts the Scalar API reference UI at GET /docs, backed by
+// the vendored standalone bundle at GET /docs/scalar.js.
 func registerDocs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
