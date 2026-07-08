@@ -518,15 +518,11 @@ func TestHandleListRuns_InvalidLimit(t *testing.T) {
 	e := newTestEnv(t)
 	_ = e.db.StartRun("r1", "", 1)
 
-	// Invalid limit should fall back to default (50).
+	// A non-integer limit fails the generated query-param binding and is
+	// rejected with 400, per the openapi.yaml contract.
 	w := e.do(http.MethodGet, "/api/runs?limit=notanumber", nil)
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d", w.Code)
-	}
-	var list []runResponse
-	decode(t, w, &list)
-	if len(list) != 1 {
-		t.Errorf("expected 1 run, got %d", len(list))
 	}
 }
 

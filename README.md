@@ -23,7 +23,7 @@ everything — fast, observable, and cancellable.
 - **Profiles** — ready-made flag sets (`web`, `web-hevc`, `archive`, `av1`, `mobile`) built into the binary; `smelt profiles` lists them, `smelt profiles show <name>` prints the exact flags each expands to, and `config.yaml` can override a built-in or add your own
 - **Workflows** — `smelt workflow` emits a schedulable, flock-guarded shell script (cron-friendly)
 - **Continuous watch** — `smelt watch` polls a directory on a timer and transcodes only new or changed files, using the same skip logic as a plain `transcode` run
-- **HTTP API** — `smelt serve` exposes per-file decision programs, run triggering, and live progress over REST for a dashboard WebUI
+- **HTTP API** — `smelt serve` exposes per-file decision programs, run triggering, and live progress over REST for a dashboard WebUI. The API is spec-first: `api/openapi.yaml` is the contract, the server is generated from it, and it's served live at `GET /openapi.yaml` (with an interactive Scalar UI at `GET /docs` in `just build-dev` builds)
 - **Dry-run mode** — inspect the full transcode plan without touching any file
 - **In-place replacement** — atomically replaces originals after a confirmed successful transcode
 - **Context-aware cancellation** — Ctrl+C / `q` cleanly kills all in-flight ffmpeg processes and removes partial output
