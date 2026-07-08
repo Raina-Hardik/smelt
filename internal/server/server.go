@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/Raina-Hardik/smelt/api"
 	"github.com/Raina-Hardik/smelt/internal/db"
 	"github.com/rs/zerolog/log"
 )
+
+var _ api.ServerInterface = (*Server)(nil)
 
 // Server is the smelt HTTP API server.
 type Server struct {
@@ -30,24 +33,28 @@ func New(database *db.DB, scriptsDir, binary, dbPath string) *Server {
 	return &Server{db: database, scriptsDir: scriptsDir, binary: binary, dbPath: dbPath}
 }
 
-// Handler returns the HTTP mux for the API.
+// Handler returns the HTTP mux for the API. Routing is generated from
+// api/openapi.yaml; handlers below implement api.ServerInterface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/health", s.handleHealth)
+	api.HandlerWithOptions(s, api.StdHTTPServerOptions{
+		BaseRouter: mux,
+		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			writeError(w, http.StatusBadRequest, err.Error())
+		},
+	})
 
-	mux.HandleFunc("GET /api/programs", s.handleListPrograms)
-	mux.HandleFunc("POST /api/programs", s.handleCreateProgram)
-	mux.HandleFunc("GET /api/programs/{id}", s.handleGetProgram)
-	mux.HandleFunc("PUT /api/programs/{id}", s.handleUpdateProgram)
-	mux.HandleFunc("DELETE /api/programs/{id}", s.handleDeleteProgram)
-	mux.HandleFunc("POST /api/programs/{id}/run", s.handleRunProgram)
-
-	mux.HandleFunc("GET /api/runs", s.handleListRuns)
-	mux.HandleFunc("GET /api/runs/{id}", s.handleGetRun)
-	mux.HandleFunc("DELETE /api/runs/{id}", s.handleCancelRun)
+	mux.HandleFunc("GET /openapi.yaml", handleSpec)
+	registerDocs(mux)
 
 	return mux
+}
+
+func handleSpec(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/yaml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(api.SpecYAML)
 }
 
 // Start begins serving on addr and blocks until the server stops.

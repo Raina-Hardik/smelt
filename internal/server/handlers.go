@@ -3,10 +3,9 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
+	"github.com/Raina-Hardik/smelt/api"
 	"github.com/Raina-Hardik/smelt/internal/workflow"
 	"github.com/google/uuid"
 )
@@ -20,59 +19,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	writeJSON(w, status, api.Error{Error: msg})
 }
 
 func decodeJSON(r *http.Request, dst any) error {
 	return json.NewDecoder(r.Body).Decode(dst)
 }
 
-// --- API types ---
-
-type programInput struct {
-	Name     string          `json:"name"`
-	Schedule string          `json:"schedule"`
-	Src      string          `json:"src"`
-	Ext      []string        `json:"ext"`
-	Rules    []workflow.Rule `json:"rules"`
-}
-
-type programResponse struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Schedule  string          `json:"schedule"`
-	Src       string          `json:"src"`
-	Ext       []string        `json:"ext"`
-	Rules     []workflow.Rule `json:"rules"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-type runResponse struct {
-	RunID      string     `json:"run_id"`
-	Name       string     `json:"name"`
-	Status     string     `json:"status"`
-	Total      int        `json:"total"`
-	OK         int        `json:"ok"`
-	Failed     int        `json:"failed"`
-	Skipped    int        `json:"skipped"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-}
-
-type jobResponse struct {
-	ID         int64     `json:"id"`
-	SourcePath string    `json:"source_path"`
-	Status     string    `json:"status"`
-	Pct        float64   `json:"pct"`
-	Speed      string    `json:"speed,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
-
-type runDetailResponse struct {
-	runResponse
-	Jobs []jobResponse `json:"jobs"`
-}
+// Aliases to the generated wire types, named for what handlers_test.go
+// already expects.
+type (
+	programResponse   = api.Program
+	runResponse       = api.Run
+	runDetailResponse = api.RunDetail
+)
 
 // --- Conversion helpers ---
 
@@ -90,22 +50,52 @@ func unmarshalRules(s string) ([]workflow.Rule, error) {
 	return rules, err
 }
 
-// --- Handlers ---
-
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+// normalizedInput is the decoded ProgramInput with its optional fields
+// resolved to the same defaults the handlers have always applied.
+type normalizedInput struct {
+	name     string
+	schedule string
+	src      string
+	ext      []string
+	rules    []workflow.Rule
 }
 
-func (s *Server) handleListPrograms(w http.ResponseWriter, _ *http.Request) {
+func normalizeInput(inp api.ProgramInput) normalizedInput {
+	n := normalizedInput{src: inp.Src}
+	if inp.Name != nil {
+		n.name = *inp.Name
+	}
+	if inp.Schedule != nil {
+		n.schedule = *inp.Schedule
+	}
+	if inp.Ext != nil {
+		n.ext = *inp.Ext
+	}
+	if len(n.ext) == 0 {
+		n.ext = []string{"mkv", "mp4", "avi"}
+	}
+	if inp.Rules != nil {
+		n.rules = *inp.Rules
+	}
+	return n
+}
+
+// --- Handlers (api.ServerInterface) ---
+
+func (s *Server) GetHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, api.Health{Status: "ok"})
+}
+
+func (s *Server) ListPrograms(w http.ResponseWriter, _ *http.Request) {
 	recs, err := s.db.ListPrograms()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := make([]programResponse, 0, len(recs))
+	out := make([]api.Program, 0, len(recs))
 	for _, rec := range recs {
 		rules, _ := unmarshalRules(rec.RulesJSON)
-		out = append(out, programResponse{
+		out = append(out, api.Program{
 			ID:        rec.ID,
 			Name:      rec.Name,
 			Schedule:  rec.Schedule,
@@ -119,54 +109,51 @@ func (s *Server) handleListPrograms(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleCreateProgram(w http.ResponseWriter, r *http.Request) {
-	var inp programInput
-	if err := decodeJSON(r, &inp); err != nil {
+func (s *Server) CreateProgram(w http.ResponseWriter, r *http.Request) {
+	var body api.ProgramInput
+	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if inp.Src == "" {
+	inp := normalizeInput(body)
+	if inp.src == "" {
 		writeError(w, http.StatusBadRequest, "src is required")
 		return
 	}
-	if len(inp.Ext) == 0 {
-		inp.Ext = []string{"mkv", "mp4", "avi"}
-	}
-	for _, rule := range inp.Rules {
+	for _, rule := range inp.rules {
 		if err := workflow.ValidateRule(rule); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
 			return
 		}
 	}
 
-	rulesJSON, err := marshalRules(inp.Rules)
+	rulesJSON, err := marshalRules(inp.rules)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
 		return
 	}
 
 	id := uuid.New().String()
-	ext := strings.Join(inp.Ext, ",")
-	if err := s.db.CreateProgram(id, inp.Name, inp.Schedule, inp.Src, ext, rulesJSON); err != nil {
+	ext := strings.Join(inp.ext, ",")
+	if err := s.db.CreateProgram(id, inp.name, inp.schedule, inp.src, ext, rulesJSON); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	rec, _ := s.db.GetProgram(id)
-	writeJSON(w, http.StatusCreated, programResponse{
+	writeJSON(w, http.StatusCreated, api.Program{
 		ID:        rec.ID,
 		Name:      rec.Name,
 		Schedule:  rec.Schedule,
 		Src:       rec.Src,
 		Ext:       strings.Split(rec.Ext, ","),
-		Rules:     inp.Rules,
+		Rules:     inp.rules,
 		CreatedAt: rec.CreatedAt,
 		UpdatedAt: rec.UpdatedAt,
 	})
 }
 
-func (s *Server) handleGetProgram(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) GetProgram(w http.ResponseWriter, r *http.Request, id api.ProgramID) {
 	rec, err := s.db.GetProgram(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -177,7 +164,7 @@ func (s *Server) handleGetProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rules, _ := unmarshalRules(rec.RulesJSON)
-	writeJSON(w, http.StatusOK, programResponse{
+	writeJSON(w, http.StatusOK, api.Program{
 		ID:        rec.ID,
 		Name:      rec.Name,
 		Schedule:  rec.Schedule,
@@ -189,8 +176,7 @@ func (s *Server) handleGetProgram(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleUpdateProgram(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) UpdateProgram(w http.ResponseWriter, r *http.Request, id api.ProgramID) {
 	rec, err := s.db.GetProgram(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -201,51 +187,48 @@ func (s *Server) handleUpdateProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var inp programInput
-	if err := decodeJSON(r, &inp); err != nil {
+	var body api.ProgramInput
+	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if inp.Src == "" {
+	inp := normalizeInput(body)
+	if inp.src == "" {
 		writeError(w, http.StatusBadRequest, "src is required")
 		return
 	}
-	if len(inp.Ext) == 0 {
-		inp.Ext = []string{"mkv", "mp4", "avi"}
-	}
-	for _, rule := range inp.Rules {
+	for _, rule := range inp.rules {
 		if err := workflow.ValidateRule(rule); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
 			return
 		}
 	}
 
-	rulesJSON, err := marshalRules(inp.Rules)
+	rulesJSON, err := marshalRules(inp.rules)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
 		return
 	}
 
-	if err := s.db.UpdateProgram(id, inp.Name, inp.Schedule, inp.Src, strings.Join(inp.Ext, ","), rulesJSON); err != nil {
+	if err := s.db.UpdateProgram(id, inp.name, inp.schedule, inp.src, strings.Join(inp.ext, ","), rulesJSON); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	rec, _ = s.db.GetProgram(id)
-	writeJSON(w, http.StatusOK, programResponse{
+	writeJSON(w, http.StatusOK, api.Program{
 		ID:        rec.ID,
 		Name:      rec.Name,
 		Schedule:  rec.Schedule,
 		Src:       rec.Src,
 		Ext:       strings.Split(rec.Ext, ","),
-		Rules:     inp.Rules,
+		Rules:     inp.rules,
 		CreatedAt: rec.CreatedAt,
 		UpdatedAt: rec.UpdatedAt,
 	})
 }
 
-func (s *Server) handleDeleteProgram(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) DeleteProgram(w http.ResponseWriter, r *http.Request, id api.ProgramID) {
 	rec, err := s.db.GetProgram(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -262,8 +245,7 @@ func (s *Server) handleDeleteProgram(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleRunProgram(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) RunProgram(w http.ResponseWriter, r *http.Request, id api.ProgramID) {
 	rec, err := s.db.GetProgram(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -294,30 +276,30 @@ func (s *Server) handleRunProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID})
+	writeJSON(w, http.StatusAccepted, api.RunAccepted{RunID: runID})
 }
 
-func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	limitStr := r.URL.Query().Get("limit")
+func (s *Server) ListRuns(w http.ResponseWriter, r *http.Request, params api.ListRunsParams) {
 	limit := 50
-	if limitStr != "" {
-		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
-			limit = n
-		}
+	if params.Limit != nil {
+		limit = *params.Limit
 	}
-	status := r.URL.Query().Get("status")
+	status := ""
+	if params.Status != nil {
+		status = string(*params.Status)
+	}
 
 	recs, err := s.db.RecentRuns(limit, status)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := make([]runResponse, 0, len(recs))
+	out := make([]api.Run, 0, len(recs))
 	for _, rec := range recs {
-		out = append(out, runResponse{
+		out = append(out, api.Run{
 			RunID:      rec.RunID,
 			Name:       rec.Name,
-			Status:     rec.Status,
+			Status:     api.RunStatus(rec.Status),
 			Total:      rec.Total,
 			OK:         rec.OK,
 			Failed:     rec.Failed,
@@ -329,8 +311,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) GetRun(w http.ResponseWriter, r *http.Request, id string) {
 	rec, err := s.db.GetRun(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -346,9 +327,9 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jobsOut := make([]jobResponse, 0, len(jobs))
+	jobsOut := make([]api.Job, 0, len(jobs))
 	for _, j := range jobs {
-		jobsOut = append(jobsOut, jobResponse{
+		jobsOut = append(jobsOut, api.Job{
 			ID:         j.ID,
 			SourcePath: j.SourcePath,
 			Status:     j.Status,
@@ -358,24 +339,21 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, runDetailResponse{
-		runResponse: runResponse{
-			RunID:      rec.RunID,
-			Name:       rec.Name,
-			Status:     rec.Status,
-			Total:      rec.Total,
-			OK:         rec.OK,
-			Failed:     rec.Failed,
-			Skipped:    rec.Skipped,
-			StartedAt:  rec.StartedAt,
-			FinishedAt: rec.FinishedAt,
-		},
-		Jobs: jobsOut,
+	writeJSON(w, http.StatusOK, api.RunDetail{
+		RunID:      rec.RunID,
+		Name:       rec.Name,
+		Status:     api.RunDetailStatus(rec.Status),
+		Total:      rec.Total,
+		OK:         rec.OK,
+		Failed:     rec.Failed,
+		Skipped:    rec.Skipped,
+		StartedAt:  rec.StartedAt,
+		FinishedAt: rec.FinishedAt,
+		Jobs:       jobsOut,
 	})
 }
 
-func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+func (s *Server) CancelRun(w http.ResponseWriter, r *http.Request, id string) {
 	rec, err := s.db.GetRun(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

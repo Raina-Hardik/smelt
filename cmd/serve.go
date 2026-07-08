@@ -28,7 +28,9 @@ API routes:
   POST   /api/programs/{id}/run
   GET    /api/runs               ?limit=N&status=running|done|failed
   GET    /api/runs/{id}
-  DELETE /api/runs/{id}          (cancel: SIGTERM to subprocess)`,
+  DELETE /api/runs/{id}          (cancel: SIGTERM to subprocess)
+  GET    /openapi.yaml           the API contract (source of truth)
+  GET    /docs                   Scalar API reference (dev builds only)`,
 	Example: `  smelt serve
   smelt serve --addr 0.0.0.0:7700
   smelt serve --addr 127.0.0.1:7700 --scripts-dir /var/lib/smelt/scripts`,
