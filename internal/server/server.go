@@ -4,13 +4,20 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Raina-Hardik/smelt/api"
 	"github.com/Raina-Hardik/smelt/internal/db"
 	"github.com/rs/zerolog/log"
 )
+
+// shutdownTimeout bounds how long Start waits for in-flight requests to
+// finish once ctx is cancelled before forcibly closing listeners.
+const shutdownTimeout = 5 * time.Second
 
 var _ api.ServerInterface = (*Server)(nil)
 
@@ -57,8 +64,33 @@ func handleSpec(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(api.SpecYAML)
 }
 
-// Start begins serving on addr and blocks until the server stops.
-func (s *Server) Start(addr string) error {
-	log.Info().Str("addr", addr).Msg("smelt server listening")
-	return http.ListenAndServe(addr, s.Handler())
+// Start begins serving on addr and blocks until ctx is cancelled (by
+// SIGINT/SIGTERM — see cmd.Execute's signal.NotifyContext) or the listener
+// fails. On cancellation it shuts down gracefully, bounded by
+// shutdownTimeout; background program runs it already spawned are
+// independent subprocesses and keep running.
+func (s *Server) Start(ctx context.Context, addr string) error {
+	httpServer := &http.Server{Addr: addr, Handler: s.Handler()}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		log.Info().Str("addr", addr).Msg("smelt server listening")
+		serveErr <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serveErr:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		log.Info().Msg("shutting down smelt server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		return nil
+	}
 }

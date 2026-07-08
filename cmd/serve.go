@@ -71,5 +71,5 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	srv := server.New(database, scriptsDir, bin, dbPath)
-	return srv.Start(addr)
+	return srv.Start(cmd.Context(), addr)
 }
