@@ -1,0 +1,21 @@
+services:
+  smelt-serve:
+    image: ghcr.io/raina-hardik/smelt:latest
+    command: serve --addr 0.0.0.0:7700 --db /data/history.db --scripts-dir /data/scripts
+    ports:
+      - "7700:7700"
+    volumes:
+      - ./data:/data
+      # Mount your media library so triggered programs can reach it, e.g.:
+      # - /mnt/media:/media
+    # Runs as your host user so files written into ./data (and any mounted
+    # media directories) aren't owned by root. Defaults to 1000:1000; override
+    # with a .env file or `SMELT_UID=$(id -u) SMELT_GID=$(id -g) docker compose up`.
+    user: "${SMELT_UID:-1000}:${SMELT_GID:-1000}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7700/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

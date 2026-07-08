@@ -136,6 +136,15 @@ the container. Alpine's ffmpeg build may also lack hardware acceleration
 support entirely; smelt's functional probes make this safe (everything falls
 back to software), it just won't be accelerated.
 
+For a self-hosted `smelt serve`, `docker-compose.yml` at the repo root wraps
+the equivalent `docker run` with a healthcheck against `/api/health` and runs
+as your host UID/GID (via `SMELT_UID`/`SMELT_GID`, default `1000:1000`) so
+files written into the bind-mounted `./data` aren't owned by root:
+
+```bash
+SMELT_UID=$(id -u) SMELT_GID=$(id -g) docker compose up -d
+```
+
 ---
 
 ## Configuration
