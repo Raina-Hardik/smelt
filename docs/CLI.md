@@ -1197,9 +1197,8 @@ time. The WebUI connects to this server — it is not embedded in the binary.
 
 The API is spec-first: `api/openapi.yaml` is the contract, and the routing and
 JSON models below are generated from it (`oapi-codegen`) so the server cannot
-diverge from what it documents. The spec is served live at `GET /openapi.yaml`
-in every build; an interactive Scalar reference UI is mounted at `GET /docs`
-in `just build-dev` builds only (compiled out entirely otherwise).
+diverge from what it documents. The spec is served live at `GET /openapi.yaml`,
+with an interactive Scalar reference UI at `GET /docs`.
 
 ### Synopsis
 
@@ -1240,7 +1239,7 @@ API routes:
   GET    /api/runs/{id}
   DELETE /api/runs/{id}          (cancel: SIGTERM to subprocess)
   GET    /openapi.yaml           the API contract (source of truth)
-  GET    /docs                   Scalar API reference (dev builds only)
+  GET    /docs                   interactive Scalar API reference
 
 Usage:
   smelt serve [flags]
@@ -1283,8 +1282,8 @@ prose.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/openapi.yaml` | The raw OpenAPI 3 contract. Served in every build. |
-| `GET` | `/docs` | Interactive Scalar API reference. Only present in `just build-dev` builds (`go build -tags dev`); compiled out of release binaries. |
+| `GET` | `/openapi.yaml` | The raw OpenAPI 3 contract. |
+| `GET` | `/docs` | Interactive Scalar API reference, rendered from the served spec. |
 
 #### Programs
 

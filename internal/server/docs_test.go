@@ -1,5 +1,3 @@
-//go:build dev
-
 package server
 
 import (
@@ -7,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestDocsServedInDevBuild(t *testing.T) {
+func TestDocsServed(t *testing.T) {
 	e := newTestEnv(t)
 
 	w := e.do(http.MethodGet, "/docs", nil)
