@@ -259,7 +259,9 @@ func probeEncodeDepth(ctx context.Context, enc, backend string, bitDepth int) bo
 		// servers where QSV would otherwise fail to auto-select a DRI node.
 		args = append(args, "-init_hw_device", "qsv=qsv:hw_any")
 	}
-	args = append(args, "-f", "lavfi", "-i", "testsrc=s=320x240:d=1")
+	// testsrc emits rgb24, which av1_nvenc can reject despite accepting normal
+	// 8-bit YUV video. testsrc2 emits yuv420p and matches the usual input path.
+	args = append(args, "-f", "lavfi", "-i", "testsrc2=s=320x240:d=1")
 	// QSV/NVENC take 10-bit system-memory frames directly; only VAAPI needs
 	// the explicit upload (both shapes validated on real hardware).
 	switch {
