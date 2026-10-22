@@ -300,3 +300,104 @@ func TestChunkedMatchesSinglePassIntegration(t *testing.T) {
 		}
 	})
 }
+
+// Video that starts after the audio (start_time 2 s): single pass keeps the
+// offset and 825 frames; chunking must too, with no duplicated frames at the
+// first boundary and the same video start.
+func TestChunkedKeepsVideoStartOffsetIntegration(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "off.mkv")
+	gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-itsoffset", "2", "-f", "lavfi", "-i", "testsrc=s=160x120:d=33:r=25", "-f", "lavfi", "-i", "sine=d=35",
+		"-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-g", "25", "-keyint_min", "25", "-sc_threshold", "0", "-c:a", "aac", src)
+	if err := gen.Run(); err != nil {
+		t.Skipf("cannot generate test media: %v", err)
+	}
+	ctx := context.Background()
+	base := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", SubtitleMode: "copy"}
+	single := filepath.Join(dir, "single.mkv")
+	if err := Run(ctx, src, single, base, nil); err != nil {
+		t.Fatal(err)
+	}
+	chunked := base
+	chunked.ChunkDuration = 10 * time.Second
+	dst := filepath.Join(dir, "off.transcoded.mkv")
+	if err := Run(ctx, src, dst, chunked, nil); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := framesOf(t, single), framesOf(t, dst); a != b {
+		t.Errorf("frame count: single=%s chunked=%s (duplicated frames at a boundary?)", a, b)
+	}
+	start := func(p string) string {
+		out, _ := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=start_time", "-of", "csv=p=0", p).Output()
+		return strings.TrimSpace(string(out))
+	}
+	if a, b := start(single), start(dst); a != b {
+		t.Errorf("video start_time: single=%s chunked=%s", a, b)
+	}
+}
+
+// Global metadata and chapters must survive the join.
+func TestChunkedKeepsMetadataAndChaptersIntegration(t *testing.T) {
+	dir := t.TempDir()
+	chap := filepath.Join(dir, "chap.txt")
+	if err := os.WriteFile(chap, []byte(";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=15000\ntitle=One\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=15000\nEND=30000\ntitle=Two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "m.mkv")
+	gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc=s=160x120:d=30:r=25", "-f", "lavfi", "-i", "sine=d=30", "-i", chap,
+		"-map", "0:v", "-map", "1:a", "-map_metadata", "2", "-map_chapters", "2", "-metadata", "title=MyTitle",
+		"-c:v", "libx264", "-g", "25", "-keyint_min", "25", "-sc_threshold", "0", "-c:a", "aac", src)
+	if err := gen.Run(); err != nil {
+		t.Skipf("cannot generate test media: %v", err)
+	}
+	dst := filepath.Join(dir, "m.transcoded.mkv")
+	spec := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", SubtitleMode: "copy", ChunkDuration: 10 * time.Second}
+	if err := Run(context.Background(), src, dst, spec, nil); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "format_tags=title:chapter=id", "-of", "default=noprint_wrappers=1", dst).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "TAG:title=MyTitle") {
+		t.Errorf("global title lost:\n%s", s)
+	}
+	if n := strings.Count(s, "id="); n != 2 {
+		t.Errorf("chapters = %d, want 2:\n%s", n, s)
+	}
+}
+
+// Sources that share a base name in one directory (a.mkv, a.mp4) are encoded
+// concurrently without sharing a work directory.
+func TestChunkedConcurrentSameBasenameIntegration(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(name string) string {
+		p := filepath.Join(dir, name)
+		gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+			"-f", "lavfi", "-i", "testsrc=s=160x120:d=30:r=25", "-c:v", "libx264", "-g", "25", "-keyint_min", "25", "-sc_threshold", "0", p)
+		if err := gen.Run(); err != nil {
+			t.Skipf("cannot generate test media: %v", err)
+		}
+		return p
+	}
+	srcs := []string{mk("a.mkv"), mk("a.mp4")}
+	spec := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", SubtitleMode: "drop", ChunkDuration: 10 * time.Second}
+	dsts := []string{filepath.Join(dir, "a.transcoded.mkv"), filepath.Join(dir, "a.transcoded.mp4")}
+	errs := make(chan error, 2)
+	for i := range srcs {
+		go func(i int) { errs <- Run(context.Background(), srcs[i], dsts[i], spec, nil) }(i)
+	}
+	for range srcs {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent chunked run: %v", err)
+		}
+	}
+	for _, d := range dsts {
+		if n := framesOf(t, d); n != "750" {
+			t.Errorf("%s: %s frames, want 750", filepath.Base(d), n)
+		}
+	}
+}

@@ -7,13 +7,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
 const (
-	transientStem  = ".transcoded"
-	chunkDirSuffix = ".transcoded.chunks" // per-file segment work dir from --chunk-duration
+	transientStem = ".transcoded"
+	// A chunk work directory (<name>.transcoded.<ext>.chunks) is only deleted
+	// when it carries ffmpeg.ChunkMarker, proving smelt created it.
+	chunkDirSuffix = ffmpeg.ChunkDirSuffix
+	chunkMarker    = ffmpeg.ChunkMarker
 )
 
 var cleanCmd = &cobra.Command{
@@ -23,8 +27,9 @@ var cleanCmd = &cobra.Command{
 
 When smelt is killed mid-encode (SIGKILL, power loss, OOM) the transient
 working file (<name>.transcoded<ext>) is not cleaned up, nor is the segment
-work directory (<name>.transcoded.chunks) that --chunk-duration creates. This
-command scans --src for those and deletes them. Use --dry-run first to preview.`,
+work directory (<name>.transcoded.<ext>.chunks, identified by a marker file
+inside it) that --chunk-duration creates. This command scans --src for those
+and deletes them. Use --dry-run first to preview.`,
 	Example: `  smelt clean --src /mnt/media --dry-run
   smelt clean --src /mnt/media
   smelt clean --src /mnt/media --ext mkv`,
@@ -70,8 +75,10 @@ func runClean(cmd *cobra.Command, _ []string) error {
 		}
 		if d.IsDir() {
 			if strings.HasSuffix(d.Name(), chunkDirSuffix) {
-				found = append(found, path)
-				return filepath.SkipDir
+				if _, err := os.Stat(filepath.Join(path, chunkMarker)); err == nil {
+					found = append(found, path)
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}

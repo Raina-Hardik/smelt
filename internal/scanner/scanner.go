@@ -67,6 +67,11 @@ func Scan(root string, extensions []string) ([]MediaFile, error) {
 		}
 
 		if d.IsDir() {
+			// smelt's own chunk work directories ("x.transcoded.mkv.chunks")
+			// hold intermediate files, never sources.
+			if path != root && isChunkDirName(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -91,4 +96,10 @@ func Scan(root string, extensions []string) ([]MediaFile, error) {
 		return nil
 	})
 	return files, err
+}
+
+// isChunkDirName matches the per-file work directories --chunk-duration
+// creates next to an output (<name>.transcoded.<ext>.chunks).
+func isChunkDirName(name string) bool {
+	return strings.HasSuffix(name, ".chunks") && strings.Contains(name, ".transcoded.")
 }

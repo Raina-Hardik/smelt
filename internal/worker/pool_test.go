@@ -244,3 +244,38 @@ func TestTranscodeCleansUpOnFailure(t *testing.T) {
 		t.Errorf("transient artifact %q should have been removed", tmp)
 	}
 }
+
+// Two sources that map to the same output (a.mkv + a.mp4 with --to mkv) would
+// be encoded concurrently into one file; only the first may run.
+func TestPlanSkipsSourcesWithCollidingOutputs(t *testing.T) {
+	dir := t.TempDir()
+	files := []scanner.MediaFile{
+		{Path: filepath.Join(dir, "a.mkv"), RelPath: "a.mkv"},
+		{Path: filepath.Join(dir, "a.mp4"), RelPath: "a.mp4"},
+		{Path: filepath.Join(dir, "b.mkv"), RelPath: "b.mkv"},
+	}
+	todo, skipped, _ := Plan(context.Background(), files, &config.Config{Suffix: ".smelt", Container: "mkv", AllowHDRLoss: true}, nil)
+	if len(todo) != 2 || skipped != 1 || todo[0].Path != files[0].Path || todo[1].Path != files[2].Path {
+		t.Fatalf("Plan = (todo %v, skipped %d), want a.mkv and b.mkv with a.mp4 skipped", todo, skipped)
+	}
+
+	// Without --to the outputs differ (a.smelt.mkv / a.smelt.mp4): both run.
+	todo, skipped, _ = Plan(context.Background(), files[:2], &config.Config{Suffix: ".smelt", AllowHDRLoss: true}, nil)
+	if len(todo) != 2 || skipped != 0 {
+		t.Fatalf("distinct outputs must both run: todo %d skipped %d", len(todo), skipped)
+	}
+}
+
+// In --inplace mode smelt's own transient files and chunk work files are never
+// sources: replacing them in place would corrupt an interrupted run's state.
+func TestPlanInplaceIgnoresOwnTransientFiles(t *testing.T) {
+	files := []scanner.MediaFile{
+		{Path: "/m/a.mkv"},
+		{Path: "/m/a.transcoded.mkv"},
+		{Path: "/m/b.mkv.transcoded.mkv.chunks/enc00000.transcoded.mkv"},
+	}
+	todo, skipped, _ := Plan(context.Background(), files, &config.Config{Codec: "h265", InPlace: true, AllowHDRLoss: true, Force: true}, nil)
+	if len(todo) != 1 || todo[0].Path != "/m/a.mkv" || skipped != 2 {
+		t.Fatalf("Plan = (todo %v, skipped %d), want only a.mkv with 2 skipped", todo, skipped)
+	}
+}

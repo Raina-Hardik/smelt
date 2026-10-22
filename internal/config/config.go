@@ -44,7 +44,7 @@ type Config struct {
 	ExtraArgs        []string      // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
 	DecodeThreads    int           // --decode-threads: caps decoder thread count (0 = ffmpeg default)
 	AllowHDRLoss     bool          // --i-know-this-drops-hdr: required to transcode a detected Dolby Vision source
-	ChunkDuration    time.Duration // --chunk-duration: split sources into keyframe-aligned segments of ~this length (0 = off)
+	ChunkDuration    time.Duration // --chunk-duration: split sources into time ranges of ~this length (0 = off)
 	ChunkCooldown    time.Duration // --chunk-cooldown: pause between consecutive segments
 
 	SubtitleMode string // "copy" (default) | "drop"
