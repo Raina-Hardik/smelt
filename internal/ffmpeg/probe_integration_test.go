@@ -4,9 +4,11 @@ package ffmpeg
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -163,24 +165,145 @@ func TestRunChunkedIntegration(t *testing.T) {
 	}
 }
 
-// A cancelled chunked run must leave no work directory behind.
-func TestRunChunkedCancelCleansUpIntegration(t *testing.T) {
+// ffmpegCallLog puts a logging wrapper in front of ffmpeg on PATH and returns
+// a function reporting how many times a given token appeared in its argv.
+func ffmpegCallLog(t *testing.T) func(token string) int {
+	t.Helper()
+	real, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not found")
+	}
 	dir := t.TempDir()
+	logf := filepath.Join(dir, "calls.log")
+	script := "#!/bin/sh\necho \"$@\" >> " + logf + "\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "ffmpeg"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func(token string) int {
+		b, _ := os.ReadFile(logf)
+		n := 0
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.Contains(line, token) {
+				n++
+			}
+		}
+		return n
+	}
+}
+
+func makeGOPClip(t *testing.T, dir string, secs int) string {
+	t.Helper()
 	src := filepath.Join(dir, "src.mkv")
 	gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc=s=160x120:d=12:r=24", "-c:v", "libx264", "-g", "24", "-keyint_min", "24", "-sc_threshold", "0", src)
+		"-f", "lavfi", "-i", "testsrc=s=160x120:d="+strconv.Itoa(secs)+":r=25", "-f", "lavfi", "-i", "sine=d="+strconv.Itoa(secs),
+		"-c:v", "libx264", "-g", "25", "-keyint_min", "25", "-sc_threshold", "0", "-c:a", "aac", src)
 	if err := gen.Run(); err != nil {
 		t.Skipf("cannot generate test media: %v", err)
 	}
+	return src
+}
+
+// An interrupted chunked run keeps its finished chunks; the next run resumes
+// from them (re-encoding only what is missing) and still produces exactly the
+// source's frames. Changed settings must not reuse the old chunks.
+func TestChunkedResumeAfterInterruptIntegration(t *testing.T) {
+	dir := t.TempDir()
+	src := makeGOPClip(t, dir, 40)
+	calls := ffmpegCallLog(t)
 	dst := filepath.Join(dir, "src.transcoded.mkv")
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	spec := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", SubtitleMode: "drop", ChunkDuration: 10 * time.Second}
+
+	// Run 1: cooldown is long, so cancelling mid-cooldown leaves chunk 1 done.
+	slow := spec
+	slow.ChunkCooldown = 30 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	spec := EncodeSpec{Codec: "h265", CRF: 30, Preset: "ultrafast", ChunkDuration: 4 * time.Second, ChunkCooldown: 30 * time.Second}
-	if err := Run(ctx, src, dst, spec, nil); err == nil {
-		t.Fatal("expected error from cancelled run")
+	if err := Run(ctx, src, dst, slow, nil); err == nil {
+		t.Fatal("expected the run to be interrupted")
+	}
+	enc, _ := filepath.Glob(filepath.Join(chunkDir(dst), "enc*.transcoded.mkv"))
+	if len(enc) == 0 {
+		t.Fatalf("an interrupted run with finished chunks must keep them in %s", chunkDir(dst))
+	}
+	if left, _ := filepath.Glob(filepath.Join(chunkDir(dst), "*.part.*")); len(left) != 0 {
+		t.Errorf("in-flight part files must not outlive the run: %v", left)
+	}
+	before := calls("-ss ")
+
+	// Run 2: resumes. Finished chunks are not re-encoded.
+	if err := Run(context.Background(), src, dst, spec, nil); err != nil {
+		t.Fatalf("resumed run: %v", err)
+	}
+	encoded := calls("-ss ") - before
+	if encoded >= 4 || encoded < 1 {
+		t.Errorf("resumed run encoded %d chunks, want fewer than the 4 total (and at least 1)", encoded)
+	}
+	if a, b := framesOf(t, src), framesOf(t, dst); a != b {
+		t.Errorf("frames after resume: source=%s output=%s", a, b)
 	}
 	if _, err := os.Stat(chunkDir(dst)); !os.IsNotExist(err) {
-		t.Errorf("work dir should be removed after cancel (stat err = %v)", err)
+		t.Errorf("work dir must be removed after success (err=%v)", err)
+	}
+
+	// Different settings after an interrupt: the stale chunks are discarded.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel2()
+	_ = os.Remove(dst)
+	if err := Run(ctx2, src, dst, slow, nil); err == nil {
+		t.Fatal("expected interruption")
+	}
+	changed := spec
+	changed.CRF = 40
+	before = calls("-ss ")
+	if err := Run(context.Background(), src, dst, changed, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls("-ss ") - before; got != 4 {
+		t.Errorf("changed CRF must re-encode every chunk, encoded %d of 4", got)
+	}
+}
+
+// A run cancelled before any chunk finished has nothing to resume, so it must
+// not leave a work directory behind.
+func TestChunkedCancelBeforeFirstChunkLeavesNothingIntegration(t *testing.T) {
+	dir := t.TempDir()
+	src := makeGOPClip(t, dir, 40)
+	dst := filepath.Join(dir, "src.transcoded.mkv")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	spec := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", ChunkDuration: 10 * time.Second}
+	if err := Run(ctx, src, dst, spec, nil); err == nil {
+		t.Fatal("expected an error from a cancelled context")
+	}
+	if _, err := os.Stat(chunkDir(dst)); !os.IsNotExist(err) {
+		t.Errorf("nothing finished, so nothing should be kept (stat err = %v)", err)
+	}
+}
+
+// Container, metadata and audio --ffmpeg-arg values take effect in chunked
+// mode (they are applied once, in the join).
+func TestChunkedAppliesOutputExtraArgsIntegration(t *testing.T) {
+	dir := t.TempDir()
+	src := makeGOPClip(t, dir, 30)
+	dst := filepath.Join(dir, "src.transcoded.mkv")
+	spec := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", SubtitleMode: "copy", AudioCodec: "aac",
+		ChunkDuration: 10 * time.Second,
+		ExtraArgs:     []string{"-vf", "scale=96:-2", "-metadata", "title=FromExtraArgs", "-b:a", "48k"}}
+	if err := Run(context.Background(), src, dst, spec, nil); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "format_tags=title:stream=codec_type,width",
+		"-of", "default=noprint_wrappers=1", dst).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "TAG:title=FromExtraArgs") {
+		t.Errorf("-metadata from --ffmpeg-arg must reach the output:\n%s", s)
+	}
+	if !strings.Contains(s, "width=96") {
+		t.Errorf("-vf from --ffmpeg-arg must apply to every chunk:\n%s", s)
 	}
 }
 
@@ -411,5 +534,75 @@ func TestChunkedConcurrentSameBasenameIntegration(t *testing.T) {
 		if n := framesOf(t, d); n != "750" {
 			t.Errorf("%s: %s frames, want 750", filepath.Base(d), n)
 		}
+	}
+}
+
+// videoPTS lists a file's video packet timestamps in seconds, ascending.
+func videoPTS(t *testing.T, path string) []float64 {
+	t.Helper()
+	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "packet=pts_time", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pts := parsePTSList(string(out))
+	sort.Float64s(pts)
+	return pts
+}
+
+// maxGap is the largest spacing between consecutive timestamps.
+func maxGap(pts []float64) float64 {
+	m := 0.0
+	for i := 1; i < len(pts); i++ {
+		if d := pts[i] - pts[i-1]; d > m {
+			m = d
+		}
+	}
+	return m
+}
+
+// The joined output must keep the source's frame timeline: every output frame
+// lands where the same source frame was (within muxer rounding), with no
+// whole-frame stalls at chunk seams. B-frame HEVC is the demanding case: the
+// encoder delay shifts each chunk's first timestamp by several frames.
+func TestChunkedHasNoTimingSeamsIntegration(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "seam.mkv")
+	gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-itsoffset", "1.5", "-f", "lavfi", "-i", "testsrc2=s=320x180:d=34:r=30000/1001",
+		"-f", "lavfi", "-i", "sine=d=36", "-map", "0:v", "-map", "1:a",
+		"-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "bframes=4:rc-lookahead=10:log-level=error",
+		"-c:a", "aac", src)
+	if err := gen.Run(); err != nil {
+		t.Skipf("cannot generate test media: %v", err)
+	}
+	for _, codec := range []string{"h265", "av1"} {
+		t.Run(codec, func(t *testing.T) {
+			preset := "ultrafast"
+			if codec == "av1" {
+				preset = "12"
+			}
+			dst := filepath.Join(dir, "seam."+codec+".transcoded.mkv")
+			spec := EncodeSpec{Codec: codec, CRF: 32, Preset: preset, SubtitleMode: "drop", ChunkDuration: 10 * time.Second}
+			if err := Run(context.Background(), src, dst, spec, nil); err != nil {
+				t.Fatal(err)
+			}
+			in, out := videoPTS(t, src), videoPTS(t, dst)
+			if len(in) != len(out) {
+				t.Fatalf("frames: source=%d output=%d", len(in), len(out))
+			}
+			worst := 0.0
+			for i := range in {
+				if d := math.Abs(in[i] - out[i]); d > worst {
+					worst = d
+				}
+			}
+			if worst > 0.01 {
+				t.Errorf("worst per-frame timestamp error = %.1f ms, want <= 10 ms (a stalled or shifted seam)", worst*1000)
+			}
+			if g := maxGap(out); g > 0.045 { // nominal 0.0334; a stalled seam shows as ~0.066
+				t.Errorf("largest frame gap = %.1f ms, want ~33 ms", g*1000)
+			}
+		})
 	}
 }
