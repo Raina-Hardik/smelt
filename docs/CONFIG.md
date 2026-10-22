@@ -630,11 +630,21 @@ stream-copied, so they are frame-accurate and no frames are lost at
 boundaries — copying at keyframes would drop the leading B-frames of every
 open-GOP segment. The encoded chunks are then concatenated with audio and
 subtitles taken from the original file, so audio is processed once, with no
-seams. HDR10 colour tags and metadata are preserved. `extra_args` apply to the
-per-chunk video encode only; audio-side arguments have no effect in chunked
-mode. Chunks live in `<name>.transcoded.chunks` next to the output and need
-roughly the output's size in extra free space; the directory is removed on
-success, failure and cancel, and `smelt clean` removes it after a hard kill.
+seams. Global metadata, chapters and the video's start offset are carried
+over from the original, and HDR10 colour tags and metadata are preserved.
+
+`extra_args` apply to the per-chunk video encode only: audio, container and
+metadata arguments (`-b:a`, `-movflags`, `-metadata`, …) have no effect in
+chunked mode. Arguments that change the timeline or stream selection (`-ss`,
+`-t`, `-to`, `-r`, `-map`, `-filter_complex`, `fps`/`trim`/`setpts` filters,
+…) cannot be applied per chunk, so smelt warns and encodes that run in a single
+pass instead of producing a different file.
+
+Chunks live in `<name>.transcoded.<ext>.chunks` next to the output (so
+sources that share a base name never share a directory) and need roughly the
+output's size in extra free space. The directory is removed on success, failure
+and cancel; `smelt clean` removes leftovers after a hard kill, but only
+directories containing smelt's `.smelt-chunks` marker file.
 
 ```yaml
 transcode:

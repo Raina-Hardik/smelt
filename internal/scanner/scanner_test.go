@@ -99,3 +99,24 @@ func mustWrite(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+func TestScanSkipsChunkWorkDirs(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.mkv"))
+	mustWrite(t, filepath.Join(root, "a.transcoded.mkv.chunks", "enc00000.transcoded.mkv"))
+	mustWrite(t, filepath.Join(root, "sub", "b.chunks", "real.mkv")) // a user's directory that merely ends in .chunks
+	files, err := Scan(root, []string{"mkv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, f := range files {
+		got[f.RelPath] = true
+	}
+	if !got["a.mkv"] || !got[filepath.Join("sub", "b.chunks", "real.mkv")] {
+		t.Errorf("legitimate files missing: %v", got)
+	}
+	if got[filepath.Join("a.transcoded.mkv.chunks", "enc00000.transcoded.mkv")] {
+		t.Errorf("smelt chunk work dir must not be scanned: %v", got)
+	}
+}

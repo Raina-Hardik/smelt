@@ -68,9 +68,54 @@ func TestTranscodePassesChunkSettingsToSpec(t *testing.T) {
 
 // Segment and work files must never be picked up as new sources.
 func TestIsOwnOutputCoversChunkFiles(t *testing.T) {
-	for _, name := range []string{"seg00001.transcoded.mkv", "enc00001.transcoded.mkv", "movie.transcoded.mkv"} {
-		if !isOwnOutput("/m/movie.transcoded.chunks/"+name, ".smelt") {
+	for _, name := range []string{"enc00001.transcoded.mkv", "movie.transcoded.mkv"} {
+		if !isOwnOutput("/m/movie.transcoded.mkv.chunks/"+name, ".smelt") {
 			t.Errorf("%s should be recognised as smelt's own output", name)
 		}
+	}
+}
+
+// --ffmpeg-arg values that change the timeline cannot be applied per chunk;
+// chunking must switch itself off rather than produce a different file.
+func TestTranscodeDisablesChunkingForTimelineArgs(t *testing.T) {
+	cases := []struct {
+		name      string
+		extra     []string
+		wantChunk bool
+	}{
+		{"scale only", []string{"-vf", "scale=1280:-2"}, true},
+		{"trim", []string{"-t", "20"}, false},
+		{"fps filter", []string{"-vf", "fps=12"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hwDecodeStubs(t)
+			cfg := &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265", ExtraArgs: c.extra,
+				ChunkDuration: 10 * time.Minute, ChunkCooldown: time.Second}
+			_, err := transcodeFile(t, cfg, func(call int, spec ffmpeg.EncodeSpec) error {
+				if got := spec.ChunkDuration > 0; got != c.wantChunk {
+					t.Errorf("chunking = %v, want %v (ChunkDuration=%v)", got, c.wantChunk, spec.ChunkDuration)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// A failed join must not trigger the hw-decode retry: it is not a decode
+// problem and a retry would redo every chunk (and every cooldown).
+func TestJoinFailureDoesNotRetry(t *testing.T) {
+	hwDecodeStubs(t)
+	calls, err := transcodeFile(t, &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265"}, func(call int, spec ffmpeg.EncodeSpec) error {
+		return &ffmpeg.JoinError{ExecError: &ffmpeg.ExecError{FilePath: "in.mkv", ExitCode: 1, Stderr: "join failed"}}
+	})
+	if err == nil {
+		t.Error("expected the join error to surface")
+	}
+	if calls != 1 {
+		t.Errorf("ffmpeg ran %d times, want 1 (no retry for a join failure)", calls)
 	}
 }

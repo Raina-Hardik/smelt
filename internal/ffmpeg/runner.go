@@ -94,7 +94,7 @@ func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(
 		if done || err != nil {
 			return err
 		}
-		// Not splittable (e.g. too few keyframes): fall through to one pass.
+		// Too short to split into two chunks: fall through to one pass.
 	}
 	return execFFmpeg(ctx, src, buildArgs(src, dst, spec), total, onProgress)
 }

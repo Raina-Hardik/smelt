@@ -45,6 +45,7 @@ type Pool struct {
 	backend     string
 
 	tenBitWarn       sync.Once // once-per-run WARN when main10 encode is unavailable
+	chunkArgsWarn    sync.Once // once-per-run WARN when --ffmpeg-arg values make chunking unsafe
 	decodeMissLogged sync.Map  // shape → struct{}; debug-log the first decode-probe miss per shape
 }
 
@@ -339,6 +340,7 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	}
 	attrs := p.decideDecode(ctx, f.Path, &spec)
 	p.applyHDR(ctx, f.Path, &spec)
+	p.checkChunkable(&spec)
 
 	start := time.Now()
 	err = ffmpegRun(ctx, f.Path, tmp, spec, onProgress)
@@ -376,6 +378,23 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	}
 	p.record(f, dst, spec, time.Since(start), nil)
 	return nil
+}
+
+// checkChunkable turns chunking off for a run whose extra ffmpeg args would be
+// applied to every chunk independently (a trim, an fps change, a custom map):
+// that cannot match a single-pass encode, so fall back to one pass instead of
+// silently producing a different file.
+func (p *Pool) checkChunkable(spec *ffmpeg.EncodeSpec) {
+	if spec.ChunkDuration <= 0 {
+		return
+	}
+	if bad := ffmpeg.ChunkUnsafeArgs(spec.ExtraArgs); len(bad) > 0 {
+		p.chunkArgsWarn.Do(func() {
+			log.Warn().Strs("args", bad).Msg("--chunk-duration ignored: these --ffmpeg-arg values change the timeline and cannot be applied per chunk; encoding in a single pass")
+		})
+		spec.ChunkDuration = 0
+		spec.ChunkCooldown = 0
+	}
 }
 
 // applyHDR carries an HDR source's colour tags and static metadata onto spec.
@@ -511,12 +530,32 @@ func (p *Pool) record(f scanner.MediaFile, dst string, spec ffmpeg.EncodeSpec, e
 // re-run with --i-know-this-drops-hdr once they've made that call knowingly.
 func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config, database *db.DB) (todo []scanner.MediaFile, skipped, blocked int) {
 	if cfg.InPlace {
-		todo, skipped = planInplace(files, cfg, database, func(p string) (string, error) {
+		// Never treat smelt's own transient artifacts (a partial from an
+		// interrupted run, chunk files) as sources to replace in place.
+		own := files[:0:0]
+		for _, f := range files {
+			if isOwnOutput(f.Path, "") {
+				skipped++
+				continue
+			}
+			own = append(own, f)
+		}
+		var inplaceSkipped int
+		todo, inplaceSkipped = planInplace(own, cfg, database, func(p string) (string, error) {
 			return ffmpeg.ProbeVideoCodec(ctx, p)
 		})
+		skipped += inplaceSkipped
 	} else {
+		claimed := map[string]string{} // final output path -> source that claimed it
 		for _, f := range files {
 			if isOwnOutput(f.Path, cfg.Suffix) {
+				skipped++
+				continue
+			}
+			if first, dup := claimed[OutputPath(f, cfg)]; dup {
+				// Two sources would write the same file (e.g. a.mkv and a.mp4
+				// with --to mkv); running both concurrently corrupts the output.
+				log.Warn().Str("file", f.Path).Str("conflicts_with", first).Str("output", OutputPath(f, cfg)).Msg("skipped: same output path as another source; rename one or use --output-dir")
 				skipped++
 				continue
 			}
@@ -532,6 +571,7 @@ func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config, da
 					continue
 				}
 			}
+			claimed[OutputPath(f, cfg)] = f.Path
 			todo = append(todo, f)
 		}
 	}
