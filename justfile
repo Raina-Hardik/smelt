@@ -33,9 +33,22 @@ test-verbose:
 vet:
     go vet ./...
 
-# Lint (requires golangci-lint on PATH).
+# Pinned to the version CI installs (.github/workflows/ci.yml).
+golangci_lint_version := "v2.12.2"
+
+# The Go toolchain go.mod names. golangci-lint type-checks with the Go it was
+# *built* with, so it must be built, and run, with the project's toolchain: one
+# built by a newer Go fails with "export data version N is greater than maximum
+# supported version". GOTOOLCHAIN makes `go` fetch the right one if needed.
+go_toolchain := "go" + `awk '/^go /{print $2}' go.mod`
+
+# Install golangci-lint at the CI version, built with the project's toolchain.
+lint-install:
+    GOTOOLCHAIN={{go_toolchain}} go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{golangci_lint_version}}
+
+# Lint exactly as CI does (needs `just lint-install` first; config in .golangci.yml).
 lint:
-    golangci-lint run ./...
+    GOTOOLCHAIN={{go_toolchain}} golangci-lint run ./...
 
 # Regenerate api/gen.go from api/openapi.yaml.
 generate:

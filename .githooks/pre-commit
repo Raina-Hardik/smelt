@@ -18,9 +18,11 @@ gofmt -w "${staged[@]}"
 git add "${staged[@]}"
 
 # golangci-lint includes govet in its default set; no need for a separate go vet.
+# GOTOOLCHAIN pins the project's Go (from go.mod): the linter fails to type-check
+# if the Go it runs under is newer than the one it was built with.
 if command -v golangci-lint &>/dev/null; then
-  golangci-lint run ./...
+  GOTOOLCHAIN="go$(awk '/^go /{print $2}' go.mod)" golangci-lint run ./...
 else
   go vet ./...
-  echo "warning: golangci-lint not found; skipping lint (run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)"
+  echo "warning: golangci-lint not found; skipping lint (run: just lint-install)"
 fi

@@ -97,11 +97,24 @@ prints a warning instead of failing.
 ## Linting
 
 ```bash
-golangci-lint run ./...
+just lint-install   # once: golangci-lint at the CI version, built with go.mod's Go
+just lint           # lint exactly as CI does
 ```
 
 The project uses `.golangci.yml` (at the repo root) to configure enabled
-linters. Lint must pass before a PR is merged.
+linters; it also covers the `integration`-tagged tests. Lint must pass before a
+PR is merged.
+
+golangci-lint type-checks with the Go it was *built* with, so it has to be
+built and run with the toolchain `go.mod` names. If your default Go is newer, a
+plain `golangci-lint run` fails with `export data version N is greater than
+maximum supported version` (a flood of "could not import os/syscall/…"
+errors). `just lint-install` and `just lint` set `GOTOOLCHAIN` for you; if you
+run the tool directly, do the same:
+
+```bash
+export GOTOOLCHAIN="go$(awk '/^go /{print $2}' go.mod)"
+```
 
 ---
 

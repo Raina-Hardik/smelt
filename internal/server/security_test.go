@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 // Program definitions arrive from an unauthenticated API and are rendered
@@ -138,5 +141,25 @@ func TestRunRefusesHostileStoredProgram(t *testing.T) {
 	}
 	if w := e.do(http.MethodPost, "/api/programs/ok/run", nil); w.Code != http.StatusAccepted {
 		t.Errorf("clean program: status = %d (%s), want 202", w.Code, w.Body.String())
+	}
+}
+
+// Listening beyond loopback with no authentication deserves a loud warning.
+func TestWarnIfExposed(t *testing.T) {
+	cases := map[string]bool{
+		"127.0.0.1:7700": false,
+		"localhost:7700": false,
+		"[::1]:7700":     false,
+		"0.0.0.0:7700":   true,
+		":7700":          true,
+		"192.168.1.5:80": true,
+		"example.com:80": true,
+	}
+	for addr, want := range cases {
+		var buf bytes.Buffer
+		warnIfExposed(zerolog.New(&buf), addr)
+		if got := strings.Contains(buf.String(), "no authentication"); got != want {
+			t.Errorf("%s: warned = %v, want %v", addr, got, want)
+		}
 	}
 }

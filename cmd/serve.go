@@ -39,6 +39,9 @@ API routes:
 }
 
 func init() {
+	// TODO(auth): the API has no authentication. Add JWT bearer-token auth and
+	// make a non-loopback --addr require it; the full plan is in
+	// internal/server/server.go (search "TODO(auth)").
 	serveCmd.Flags().String("addr", "127.0.0.1:7700", "listen address")
 	serveCmd.Flags().String("scripts-dir", "", "directory to write rendered program scripts (default: system temp dir)")
 	rootCmd.AddCommand(serveCmd)

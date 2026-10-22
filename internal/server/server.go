@@ -15,6 +15,7 @@ import (
 
 	"github.com/Raina-Hardik/smelt/api"
 	"github.com/Raina-Hardik/smelt/internal/db"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -79,6 +80,8 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	warnIfExposed(log.Logger, addr)
+
 	serveErr := make(chan error, 1)
 	go func() {
 		log.Info().Str("addr", addr).Msg("smelt server listening")
@@ -101,6 +104,38 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 		return nil
 	}
 }
+
+// TODO(auth): add real authentication (JWT bearer tokens) to the API.
+//
+// The API is unauthenticated today. It relies on being bound to loopback (the
+// default) or fronted by an authenticating reverse proxy, and anyone who can
+// reach the port can create and run programs, which execute as the server's
+// user. guard() below only stops *browser-driven* attacks (CSRF, DNS
+// rebinding); it does nothing against a client that can open a socket.
+//
+// Plan:
+//   - Verify "Authorization: Bearer <jwt>" in a middleware layered after
+//     guard(), on every /api/ route. Check signature, exp, nbf, iss and aud, and
+//     pin the accepted algorithm(s): reject "none" and any alg/key-type
+//     confusion. Leave /api/health open for container healthchecks.
+//   - Key material comes from config/env, never a default: a shared secret for
+//     HS256 (e.g. SMELT_JWT_SECRET, plus a matching config.yaml key) or a
+//     public key file for EdDSA/RS256. Refuse to start on a non-loopback
+//     --addr without one, instead of only warning (see the warning in Start).
+//   - Scopes: at least read vs. write. Creating, updating, running and
+//     cancelling programs is RCE-equivalent, so a dashboard that only needs to
+//     look must be able to hold a token that cannot do those.
+//   - `smelt token` subcommand to mint tokens (sub, scope, ttl); document
+//     rotation and revocation (short ttl + key rotation is enough to start).
+//   - Declare the bearerAuth security scheme in api/openapi.yaml and regenerate
+//     api/gen.go (spec-first); answer 401 + WWW-Authenticate for missing or bad
+//     tokens and 403 for insufficient scope.
+//   - Tests: missing, expired, not-yet-valid, forged, wrong-alg and "none"
+//     tokens; scope enforcement per route; health stays open; the Origin and
+//     Host checks in guard() still apply on top.
+//
+// Until then the README, docs/CLI.md and docker-compose.yml all say plainly
+// that the API has no authentication.
 
 // guard protects the unauthenticated API from being driven by a web page the
 // operator happens to visit:
@@ -130,6 +165,16 @@ func guard(next http.Handler, addr string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// warnIfExposed logs a loud warning when the (unauthenticated) API listens
+// beyond loopback. It takes its logger as a parameter so it can be tested
+// without touching the process-wide logger.
+func warnIfExposed(l zerolog.Logger, addr string) {
+	if isLoopbackAddr(addr) {
+		return
+	}
+	l.Warn().Str("addr", addr).Msg("smelt serve has no authentication and is listening beyond loopback: anyone who can reach this port can create and run programs; put an authenticating reverse proxy in front of it")
 }
 
 func isLoopbackAddr(addr string) bool {
