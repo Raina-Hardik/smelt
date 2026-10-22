@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
@@ -48,5 +49,28 @@ func TestTranscodeSDRAndProbeFailureLeaveHDRNil(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestTranscodePassesChunkSettingsToSpec(t *testing.T) {
+	hwDecodeStubs(t)
+	cfg := &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265", ChunkDuration: 10 * time.Minute, ChunkCooldown: 30 * time.Second}
+	_, err := transcodeFile(t, cfg, func(call int, spec ffmpeg.EncodeSpec) error {
+		if spec.ChunkDuration != 10*time.Minute || spec.ChunkCooldown != 30*time.Second {
+			t.Errorf("spec chunk = %v / %v", spec.ChunkDuration, spec.ChunkCooldown)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Segment and work files must never be picked up as new sources.
+func TestIsOwnOutputCoversChunkFiles(t *testing.T) {
+	for _, name := range []string{"seg00001.transcoded.mkv", "enc00001.transcoded.mkv", "movie.transcoded.mkv"} {
+		if !isOwnOutput("/m/movie.transcoded.chunks/"+name, ".smelt") {
+			t.Errorf("%s should be recognised as smelt's own output", name)
+		}
 	}
 }

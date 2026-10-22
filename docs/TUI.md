@@ -109,6 +109,9 @@ Every `smelt transcode` flag works when passed to `smelt tui` — it just seeds
 the pre-flight screen's starting values. Not every flag is *also* live-editable
 on that screen, for two distinct reasons:
 
+- **Honored but not shown.** `--chunk-duration` and `--chunk-cooldown` apply to
+  every encode the TUI starts (see [CLI.md](CLI.md)); they have no on-screen
+  control.
 - **Determines which files are even in the queue.** `--ext`, `--force`,
   `--skip-hardlinked`, `--skip-source-codec`, `--profile`, `--ffmpeg-arg`, and
   `--i-know-this-drops-hdr` all act during the background scan/plan, before

@@ -63,6 +63,21 @@ func TestScriptConditionalFlags(t *testing.T) {
 	}
 }
 
+func TestScriptChunkFlags(t *testing.T) {
+	if s := Script(baseCfg(), Options{}); strings.Contains(s, "--chunk") {
+		t.Error("chunk flags must be omitted when chunking is off")
+	}
+	cfg := baseCfg()
+	cfg.ChunkDuration = 10 * time.Minute
+	cfg.ChunkCooldown = 30 * time.Second
+	s := Script(cfg, Options{})
+	for _, w := range []string{"--chunk-duration '10m0s'", "--chunk-cooldown '30s'"} {
+		if !strings.Contains(s, w) {
+			t.Errorf("script missing %q", w)
+		}
+	}
+}
+
 func TestShellQuoteEscapes(t *testing.T) {
 	cases := map[string]string{
 		"plain":      "'plain'",

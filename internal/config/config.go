@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/spf13/viper"
 )
+
+// MinChunkDuration is the shortest --chunk-duration accepted; shorter segments
+// would multiply per-process startup cost for no thermal benefit.
+const MinChunkDuration = 10 * time.Second
 
 // Config holds the resolved configuration for a smelt run.
 // Populated by Load() from viper's merged view of flags, env vars, and config.yaml.
@@ -36,9 +41,11 @@ type Config struct {
 	OutputDir        string
 	Suffix           string
 	Profile          string
-	ExtraArgs        []string // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
-	DecodeThreads    int      // --decode-threads: caps decoder thread count (0 = ffmpeg default)
-	AllowHDRLoss     bool     // --i-know-this-drops-hdr: required to transcode a detected Dolby Vision source
+	ExtraArgs        []string      // raw ffmpeg passthrough args (--ffmpeg-arg + profile extra_args)
+	DecodeThreads    int           // --decode-threads: caps decoder thread count (0 = ffmpeg default)
+	AllowHDRLoss     bool          // --i-know-this-drops-hdr: required to transcode a detected Dolby Vision source
+	ChunkDuration    time.Duration // --chunk-duration: split sources into keyframe-aligned segments of ~this length (0 = off)
+	ChunkCooldown    time.Duration // --chunk-cooldown: pause between consecutive segments
 
 	SubtitleMode string // "copy" (default) | "drop"
 	DBPath       string // path to the SQLite history database; "" disables the DB
@@ -139,6 +146,8 @@ func Load() *Config {
 		ExtraArgs:     append(profileExtra, viper.GetStringSlice("transcode.ffmpeg_args")...),
 		DecodeThreads: viper.GetInt("transcode.decode_threads"),
 		AllowHDRLoss:  viper.GetBool("transcode.allow_hdr_loss"),
+		ChunkDuration: viper.GetDuration("transcode.chunk_duration"),
+		ChunkCooldown: viper.GetDuration("transcode.chunk_cooldown"),
 
 		SubtitleMode: viper.GetString("transcode.subs"),
 		DBPath:       viper.GetString("smelt.db"),
@@ -209,6 +218,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DecodeThreads < 0 {
 		return fmt.Errorf("--decode-threads %d must be >= 0", c.DecodeThreads)
+	}
+	if c.ChunkDuration < 0 || (c.ChunkDuration > 0 && c.ChunkDuration < MinChunkDuration) {
+		return fmt.Errorf("--chunk-duration %s must be 0 (off) or at least %s", c.ChunkDuration, MinChunkDuration)
+	}
+	if c.ChunkCooldown < 0 {
+		return fmt.Errorf("--chunk-cooldown %s must be >= 0", c.ChunkCooldown)
 	}
 	if !ffmpeg.IsKnownHWAccel(c.HWAccel) {
 		return fmt.Errorf("unknown --hwaccel %q; valid: auto, none, nvenc, qsv, vaapi, amf, videotoolbox", c.HWAccel)

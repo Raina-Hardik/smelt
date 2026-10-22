@@ -112,6 +112,8 @@ var envVarBindings = map[string]string{
 	"transcode.suffix":             "SMELT_SUFFIX",
 	"transcode.decode_threads":     "SMELT_DECODE_THREADS",
 	"transcode.allow_hdr_loss":     "SMELT_ALLOW_HDR_LOSS",
+	"transcode.chunk_duration":     "SMELT_CHUNK_DURATION",
+	"transcode.chunk_cooldown":     "SMELT_CHUNK_COOLDOWN",
 }
 
 // bindEnvVars wires envVarBindings into viper so CLI flag > env var >

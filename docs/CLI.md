@@ -137,6 +137,8 @@ Examples:
 Flags:
       --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --chunk-cooldown duration         pause between consecutive segments when --chunk-duration is set (e.g. 30s), letting the hardware cool down
+      --chunk-duration duration         split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
       --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
@@ -177,6 +179,8 @@ Global Flags:
 | `--audio-bitrate` | string | _(encoder default)_ | Target audio bitrate when re-encoding, e.g. `192k`. Ignored when `--audio-codec=copy`. |
 | `--codec` | string | `h265` | Target video codec. Valid values: `h264`, `h265`, `av1`, `vp9`. Maps to `libx264`, `libx265`, `libsvtav1`, `libvpx-vp9` respectively. |
 | `--crf` | int | `23` | Constant Rate Factor controlling quality vs. file size. Lower values produce higher quality. Valid range: 0–51. |
+| `--chunk-duration` | duration | `0` (off) | Split each source at keyframes into segments of about this length (e.g. `10m`), encoding each in its own ffmpeg process, then join them. Bounds how long any single process runs, which helps thermally limited hardware; it complements `--decode-threads`/`--workers`, which limit *how hard* ffmpeg runs rather than for how long. Minimum `10s`. Sources shorter than twice the chunk length, or without enough keyframes to split, are encoded in one pass as usual. Audio and subtitles are never chunked: they are taken from the original in the final join, so audio is processed once with no seams. Needs roughly 2× the source's size in free space next to the output while a file is in flight. Interrupted runs leave a `<name>.transcoded.chunks` directory that `smelt clean` removes. |
+| `--chunk-cooldown` | duration | `0` | Pause between consecutive segments when `--chunk-duration` is set (e.g. `30s`), letting the hardware cool. No pause after the last segment. |
 | `--decode-threads` | int | `0` | Caps ffmpeg's decoder thread count. `0` leaves it at ffmpeg's default (usually all available cores). Emitted as a global `-threads N` *before* `-i`, so — unlike `--ffmpeg-arg -threads N` placed after `-i`, which only constrains the encoder — it actually throttles decode. Relevant for large software-decoded sources (e.g. 10-bit 4K HEVC) running alongside a hardware encoder, where decode is the uncapped, thermally expensive half of the pipeline; see the `--hwaccel` note on the resource-profile warning below. While hardware decode is active for a file (see `--hwdecode`), `-threads` is pointless and is omitted from the command (a debug line notes it when the flag was set); the cap still applies in full on every software-decode path — `--hwdecode off`, sources the device can't decode, and the automatic software-decode retry. |
 | `--dry-run` | bool | `false` | Print the full transcode plan (source → destination, codec, CRF) without executing ffmpeg or writing any files. |
 | `--ext` | strings | `mkv,mp4,avi` | Comma-separated list of file extensions to match during the directory scan. Case-insensitive. Leading dots optional. |
@@ -361,6 +365,8 @@ Examples:
 Flags:
       --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --chunk-cooldown duration         pause between consecutive segments when --chunk-duration is set (e.g. 30s), letting the hardware cool down
+      --chunk-duration duration         split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
       --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
@@ -464,6 +470,8 @@ Usage:
 Flags:
       --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --chunk-cooldown duration         pause between consecutive segments when --chunk-duration is set (e.g. 30s), letting the hardware cool down
+      --chunk-duration duration         split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
       --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
@@ -784,6 +792,8 @@ Examples:
 Flags:
       --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --chunk-cooldown duration         pause between consecutive segments when --chunk-duration is set (e.g. 30s), letting the hardware cool down
+      --chunk-duration duration         split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
       --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
@@ -1090,6 +1100,8 @@ Examples:
 Flags:
       --audio-bitrate string            audio bitrate when re-encoding, e.g. 192k (ignored when --audio-codec=copy)
       --audio-codec string              audio codec: copy|aac|opus|mp3|ac3|flac (copy = passthrough, no re-encode) (default "copy")
+      --chunk-cooldown duration         pause between consecutive segments when --chunk-duration is set (e.g. 30s), letting the hardware cool down
+      --chunk-duration duration         split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight
       --codec string                    target video codec: h264|h265|av1|vp9 (default "h265")
       --crf int                         constant rate factor 0-51; lower = higher quality (default 23)
       --decode-threads int              cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path
@@ -1497,6 +1509,8 @@ also be set via a flat `SMELT_`-prefixed environment variable. Precedence
 | `--to` | `SMELT_TO` |
 | `--output-dir` | `SMELT_OUTPUT_DIR` |
 | `--suffix` | `SMELT_SUFFIX` |
+| `--chunk-duration` | `SMELT_CHUNK_DURATION` |
+| `--chunk-cooldown` | `SMELT_CHUNK_COOLDOWN` |
 | `--decode-threads` | `SMELT_DECODE_THREADS` |
 | `--i-know-this-drops-hdr` | `SMELT_ALLOW_HDR_LOSS` |
 

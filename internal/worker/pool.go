@@ -330,6 +330,8 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		AudioBitrate:  p.cfg.AudioBitrate,
 		SubtitleMode:  p.cfg.SubtitleMode,
 		DecodeThreads: p.cfg.DecodeThreads,
+		ChunkDuration: p.cfg.ChunkDuration,
+		ChunkCooldown: p.cfg.ChunkCooldown,
 		ExtraArgs:     p.cfg.ExtraArgs,
 		Container:     strings.TrimPrefix(filepath.Ext(dst), "."),
 		Encoder:       p.encoder,
