@@ -21,6 +21,24 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  integration:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | head -1
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx265|libsvtav1" || true
+      - run: go test -tags integration -count=1 ./...
+
   lint:
     permissions:
       contents: read

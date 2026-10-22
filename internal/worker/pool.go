@@ -453,7 +453,11 @@ func (p *Pool) checkChunkable(spec *ffmpeg.EncodeSpec) {
 // flagged instead of silently degrading.
 func (p *Pool) applyHDR(ctx context.Context, path string, spec *ffmpeg.EncodeSpec) {
 	hdr, err := probeHDR(ctx, path)
-	if err != nil || hdr == nil {
+	if err != nil {
+		log.Debug().Err(err).Str("file", path).Msg("HDR probe failed; treating the source as SDR")
+		return
+	}
+	if hdr == nil {
 		return
 	}
 	spec.HDR = hdr

@@ -57,6 +57,11 @@ func TestProbeDolbyVisionNegative(t *testing.T) {
 
 // TestHDR10RoundTripIntegration encodes an HDR10 source through Run for each
 // software encoder and verifies colour tags and static metadata survive.
+//
+// Note: ffmpeg 8.x already carries this metadata through plain libx265 and
+// SVT-AV1 re-encodes, so this guards the end-to-end result (and older builds,
+// where hdrArgs does the work), not hdrArgs in isolation. The unit tests in
+// hdr_test.go are what pin the exact arguments smelt emits.
 func TestHDR10RoundTripIntegration(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.mkv")
