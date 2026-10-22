@@ -65,10 +65,6 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Resolve the best hardware-available codec before planning so that the
-	// smart-skip target matches what will actually be encoded.
-	cfg.Codec = ffmpeg.ResolveCodec(cmd.Context(), cfg.Codec, cfg.HWAccel)
-
 	files, skipped, blocked := worker.Plan(cmd.Context(), files, cfg, database)
 	if skipped > 0 {
 		log.Info().Int("skipped", skipped).Msg("skipped up-to-date files (use --force to re-transcode)")

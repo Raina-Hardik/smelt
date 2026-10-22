@@ -82,10 +82,6 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 		defer func() { _ = database.Close() }()
 	}
 
-	// Resolve the best hardware-available codec once, up front: it does not
-	// change between passes and re-probing every tick would spawn ffmpeg for
-	// no reason.
-	cfg.Codec = ffmpeg.ResolveCodec(cmd.Context(), cfg.Codec, cfg.HWAccel)
 	pool := worker.New(cfg, database)
 
 	// --inplace is destructive; confirm once for the life of the watch rather
