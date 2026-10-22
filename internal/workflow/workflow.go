@@ -117,6 +117,12 @@ func TranscodeArgs(cfg *config.Config) []string {
 	if strings.EqualFold(cfg.HWDecode, "off") {
 		args = append(args, flag("--hwdecode", "off"))
 	}
+	if cfg.ChunkDuration > 0 {
+		args = append(args, flag("--chunk-duration", cfg.ChunkDuration.String()))
+	}
+	if cfg.ChunkCooldown > 0 {
+		args = append(args, flag("--chunk-cooldown", cfg.ChunkCooldown.String()))
+	}
 	if cfg.AllowHDRLoss {
 		args = append(args, "--i-know-this-drops-hdr")
 	}

@@ -51,6 +51,12 @@ type EncodeSpec struct {
 	// HDR is the source's HDR signalling (nil for SDR). When set, colour tags
 	// and static metadata are carried through the encode.
 	HDR *HDRInfo
+
+	// ChunkDuration > 0 splits long sources at keyframes into segments of about
+	// this length, each encoded by its own ffmpeg process. ChunkCooldown is the
+	// pause between consecutive segments (0 = none).
+	ChunkDuration time.Duration
+	ChunkCooldown time.Duration
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -77,11 +83,25 @@ var timeRe = regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
 var speedRe = regexp.MustCompile(`speed=\s*([\d.]+)x`)
 
 // Run transcodes src → dst using spec, calling onProgress for each parsed
-// progress line. onProgress may be nil. ctx cancellation kills ffmpeg.
+// progress line. onProgress may be nil. ctx cancellation kills ffmpeg. With
+// spec.ChunkDuration set and a source long enough to split, the transcode runs
+// as a series of bounded segment encodes (see runChunked).
 func Run(ctx context.Context, src, dst string, spec EncodeSpec, onProgress func(ProgressEvent)) error {
 	total, _ := probeDuration(ctx, src)
 
-	args := buildArgs(src, dst, spec)
+	if spec.ChunkDuration > 0 && total > 2*spec.ChunkDuration {
+		done, err := runChunked(ctx, src, dst, spec, total, onProgress)
+		if done || err != nil {
+			return err
+		}
+		// Not splittable (e.g. too few keyframes): fall through to one pass.
+	}
+	return execFFmpeg(ctx, src, buildArgs(src, dst, spec), total, onProgress)
+}
+
+// execFFmpeg runs ffmpeg with args, parsing progress against total. src labels
+// progress events and errors.
+func execFFmpeg(ctx context.Context, src string, args []string, total time.Duration, onProgress func(ProgressEvent)) error {
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 
 	stderr, err := cmd.StderrPipe()

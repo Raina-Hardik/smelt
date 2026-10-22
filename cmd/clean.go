@@ -11,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const transientStem = ".transcoded"
+const (
+	transientStem  = ".transcoded"
+	chunkDirSuffix = ".transcoded.chunks" // per-file segment work dir from --chunk-duration
+)
 
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
@@ -19,8 +22,9 @@ var cleanCmd = &cobra.Command{
 	Long: `Remove leftover .transcoded partial artifacts from interrupted transcode runs.
 
 When smelt is killed mid-encode (SIGKILL, power loss, OOM) the transient
-working file (<name>.transcoded<ext>) is not cleaned up. This command scans
---src for those files and deletes them. Use --dry-run first to preview.`,
+working file (<name>.transcoded<ext>) is not cleaned up, nor is the segment
+work directory (<name>.transcoded.chunks) that --chunk-duration creates. This
+command scans --src for those and deletes them. Use --dry-run first to preview.`,
 	Example: `  smelt clean --src /mnt/media --dry-run
   smelt clean --src /mnt/media
   smelt clean --src /mnt/media --ext mkv`,
@@ -61,7 +65,14 @@ func runClean(cmd *cobra.Command, _ []string) error {
 			}
 			return nil
 		}
-		if d.Type()&fs.ModeSymlink != 0 || d.IsDir() {
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if d.IsDir() {
+			if strings.HasSuffix(d.Name(), chunkDirSuffix) {
+				found = append(found, path)
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -106,7 +117,7 @@ func runClean(cmd *cobra.Command, _ []string) error {
 
 	var failed int
 	for _, p := range found {
-		if err := os.Remove(p); err != nil {
+		if err := os.RemoveAll(p); err != nil {
 			log.Error().Err(err).Str("file", p).Msg("failed to remove")
 			failed++
 			continue

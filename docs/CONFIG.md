@@ -48,6 +48,8 @@ transcode:
   output_dir: ""              # string   — redirect output here; empty = alongside source
   suffix: ".smelt"            # string   — output filename suffix (alongside source)
   decode_threads: 0           # int      — cap decoder thread count; 0 = ffmpeg default
+  chunk_duration: 0           # duration — split sources into ~this-long segments (e.g. 10m); 0 = off
+  chunk_cooldown: 0           # duration — pause between segments (e.g. 30s)
   allow_hdr_loss: false       # bool     — required to transcode a detected Dolby Vision source
 
 # Profiles: preconfigured flag sets applied with `smelt transcode --profile <name>`.
@@ -606,6 +608,51 @@ resource-profile warning above.
 transcode:
   decode_threads: 4
 ```
+
+#### `transcode.chunk_duration`
+
+| Attribute | Value |
+|---|---|
+| Type | `duration` (e.g. `10m`, `90s`) |
+| Default | `0` (off) |
+| CLI flag | `--chunk-duration` |
+| Env var | `SMELT_CHUNK_DURATION` |
+
+Splits each source at keyframes into segments of about this length, encodes
+each segment in its own ffmpeg process, then joins them. It bounds the
+*duration* of any single ffmpeg process — aimed at thermally limited hardware
+— and complements `decode_threads`/`workers`, which cap how hard ffmpeg runs.
+Minimum `10s`; sources shorter than twice the chunk length, or without enough
+keyframes to split, are encoded in one pass.
+
+How it works: the video stream is split with stream copy (so cuts land on
+keyframes), each segment is encoded video-only with the run's normal video
+settings (`extra_args` apply per segment), and the encoded segments are
+concatenated with audio and subtitles taken from the original file — audio is
+therefore processed once, with no segment seams. HDR10 colour tags and
+metadata are preserved. Segments live in `<name>.transcoded.chunks` next to the
+output and need roughly 2× the source's size in free space; the directory is
+removed on success, failure and cancel, and `smelt clean` removes it after a
+hard kill.
+
+```yaml
+transcode:
+  chunk_duration: 10m
+  chunk_cooldown: 30s
+```
+
+#### `transcode.chunk_cooldown`
+
+| Attribute | Value |
+|---|---|
+| Type | `duration` |
+| Default | `0` |
+| CLI flag | `--chunk-cooldown` |
+| Env var | `SMELT_CHUNK_COOLDOWN` |
+
+Pause between consecutive segments when `chunk_duration` is set, letting the
+hardware cool down. No pause follows the last segment. Has no effect when
+chunking is off.
 
 #### `transcode.ffmpeg_args`
 

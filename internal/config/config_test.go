@@ -3,6 +3,7 @@ package config
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -205,5 +206,42 @@ func TestDefaultsMatchLoadDefaults(t *testing.T) {
 	}
 	if fromDefaults.Suffix != fromLoad.Suffix {
 		t.Errorf("Suffix: Defaults=%q Load=%q", fromDefaults.Suffix, fromLoad.Suffix)
+	}
+}
+
+func TestLoadParsesChunkDurations(t *testing.T) {
+	viper.Reset()
+	viper.Set("transcode.chunk_duration", "10m")
+	viper.Set("transcode.chunk_cooldown", "30s")
+	cfg := Load()
+	if cfg.ChunkDuration != 10*time.Minute || cfg.ChunkCooldown != 30*time.Second {
+		t.Errorf("chunk = %v / %v, want 10m / 30s", cfg.ChunkDuration, cfg.ChunkCooldown)
+	}
+	viper.Reset()
+	if cfg := Load(); cfg.ChunkDuration != 0 || cfg.ChunkCooldown != 0 {
+		t.Errorf("chunking must default off, got %v / %v", cfg.ChunkDuration, cfg.ChunkCooldown)
+	}
+}
+
+func TestValidateChunkSettings(t *testing.T) {
+	viper.Reset()
+	cases := []struct {
+		name     string
+		dur, cd  time.Duration
+		wantFail bool
+	}{
+		{"off", 0, 0, false},
+		{"ok", 10 * time.Minute, 30 * time.Second, false},
+		{"minimum", MinChunkDuration, 0, false},
+		{"too short", 5 * time.Second, 0, true},
+		{"negative duration", -time.Minute, 0, true},
+		{"negative cooldown", time.Minute, -time.Second, true},
+		{"cooldown without chunking is harmless", 0, time.Minute, false},
+	}
+	for _, c := range cases {
+		err := (&Config{Codec: "h265", ChunkDuration: c.dur, ChunkCooldown: c.cd}).Validate()
+		if (err != nil) != c.wantFail {
+			t.Errorf("%s: Validate() = %v, wantFail=%v", c.name, err, c.wantFail)
+		}
 	}
 }

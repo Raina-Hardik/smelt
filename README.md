@@ -17,6 +17,7 @@ everything — fast, observable, and cancellable.
 - **Hardware acceleration** — `--hwaccel auto` functionally probes for a usable GPU encoder (NVENC / QSV / VAAPI / AMF / VideoToolbox) and falls back to software; on NVENC/QSV/VAAPI, decode runs on the same device too when a per-file probe confirms the source is decodable there (`--hwdecode auto`, opt out with `off`)
 - **Interactive TUI** — editable pre-flight screen, live per-file progress bars, file queue, pause/resume, clean cancellation
 - **HDR10 preservation** — HDR10/HLG sources keep their colour tags (primaries, transfer, matrix, range) and HDR10 static metadata (mastering display, MaxCLL/MaxFALL) through re-encodes; always on, no flag. Use h265 or av1 targets — H.264 can't reliably carry 10-bit HDR and logs a warning
+- **Chunked transcode** — `--chunk-duration 10m [--chunk-cooldown 30s]` splits long files at keyframes and encodes each piece in its own ffmpeg process with a cool-down gap, bounding how long any one process runs on thermally limited hardware
 - **Audio control** — stream-copy by default, or re-encode with `--audio-codec` / `--audio-bitrate`
 - **Container conversion** — retarget the container with `--to mp4|mkv|webm` (mp4 gets faststart + hvc1)
 - **Idempotent re-runs** — skips files already produced, or (with `--inplace`) files already in the target codec
@@ -215,9 +216,16 @@ instead: many concurrent 4K surfaces can exhaust VRAM (or hit NVDEC session
 limits on consumer GeForce cards), which surfaces as per-file failures that
 auto-retry in software — if that happens at scale, lower `--workers`.
 
+For very long files, `--chunk-duration` (optionally with `--chunk-cooldown`)
+bounds the *duration* of any single ffmpeg process instead of its intensity:
+the file is split at keyframes, each segment is encoded in its own process with
+a cool-down gap between them, and the pieces are joined with audio and
+subtitles taken from the original. It needs roughly 2x the source's size in
+free space beside the output while a file is in flight.
+
 Beyond that, smelt has no CPU/thermal governor of its own, on any platform —
-`--hwdecode`, `--decode-threads`, and `--workers` are the levers smelt itself
-gives you;
+`--hwdecode`, `--decode-threads`, `--workers`, and `--chunk-duration` are the
+levers smelt itself gives you;
 everything past that is OS-level throttling, and which tool that means
 depends on what you're running:
 
@@ -284,15 +292,6 @@ default transcode flow:
   `smelt` subcommand that opts into the extra external-tool pipeline, kept
   separate from the default single-ffmpeg-invocation flow so the common case
   stays simple and dependency-light.
-
-A separate idea, for thermally-limited hardware rather than complex source
-material: **chunked/segmented transcode** — split a large file at keyframe
-boundaries, transcode each segment as its own ffmpeg invocation with a
-cool-down gap in between, then concatenate. Distinct from a thermal governor
-(see [Running politely on constrained hardware](#running-politely-on-constrained-hardware))
-because it bounds the *duration* of any single ffmpeg process rather than
-trying to cap its resource usage while it runs; the two are complementary, not
-alternatives. Not designed yet.
 
 Nothing here is scheduled — this is a place to collect ideas before design
 work starts.

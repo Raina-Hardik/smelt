@@ -235,6 +235,14 @@ func addTranscodeFlags(cmd *cobra.Command) {
 		"decode-threads", 0,
 		"cap ffmpeg's decoder thread count (0 = ffmpeg default); unlike --ffmpeg-arg this lands before -i, so it constrains the decode side, not just the encoder; omitted while hardware decode is active, still applied on every software-decode path",
 	)
+	cmd.Flags().Duration(
+		"chunk-duration", 0,
+		"split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight",
+	)
+	cmd.Flags().Duration(
+		"chunk-cooldown", 0,
+		"pause between consecutive segments when --chunk-duration is set (e.g. 30s), letting the hardware cool down",
+	)
 	cmd.Flags().Bool(
 		"i-know-this-drops-hdr", false,
 		"required to transcode a source with a detected Dolby Vision stream; smelt drops the DV RPU layer on re-encode with no passthrough support yet, so this flag is an explicit acknowledgement rather than a silent quality loss",
@@ -268,6 +276,8 @@ func bindTranscodeFlags(cmd *cobra.Command, _ []string) error {
 		{"transcode.ffmpeg_args", "ffmpeg-arg"},
 		{"transcode.subs", "subs"},
 		{"transcode.decode_threads", "decode-threads"},
+		{"transcode.chunk_duration", "chunk-duration"},
+		{"transcode.chunk_cooldown", "chunk-cooldown"},
 		{"transcode.allow_hdr_loss", "i-know-this-drops-hdr"},
 		{"transcode.dry_run", "dry-run"}, // transcode only; skipped where absent
 	}
