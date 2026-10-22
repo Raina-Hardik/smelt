@@ -482,8 +482,17 @@ transcode:
 | Env var | `SMELT_INPLACE` |
 
 When `true`, atomically replaces the original file with the transcoded output
-after a confirmed successful ffmpeg exit. The original is **unrecoverable**
-after this operation. Consider combining with a `--dry-run` pass first.
+after a successful ffmpeg exit **and** a sanity check of the new file: it must
+be non-empty, readable by `ffprobe`, contain a video stream, and (when both
+durations are known) match the source's duration to within 2 s or 2%. If the
+check fails the original is left untouched and the file is reported as failed.
+The original is **unrecoverable** after a successful replace. Consider
+combining with a `--dry-run` pass first.
+
+Symlinked files are **skipped** in this mode (replacing a link would turn it
+into a regular file and encode its target a second time); transcode the
+link's target instead. Hardlinked files are replaced unless `skip_hardlinked`
+is set, which breaks the hardlink.
 
 Files **already in the target codec are skipped** (probed with `ffprobe`),
 making in-place runs idempotent. Override with `force: true`.

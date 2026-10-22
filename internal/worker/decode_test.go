@@ -29,6 +29,11 @@ func stubWorkerFFmpeg(t *testing.T) {
 		ffmpegRun, probeAttrs, probeDecode, probeEncoder10Bit, probeHDR = origRun, origAttrs, origDecode, orig10, origHDR
 	})
 	probeHDR = func(ctx context.Context, path string) (*ffmpeg.HDRInfo, error) { return nil, nil }
+	origHealth := probeHealth
+	t.Cleanup(func() { probeHealth = origHealth })
+	probeHealth = func(ctx context.Context, path string) (*ffmpeg.FileHealth, error) {
+		return &ffmpeg.FileHealth{HasVideo: true}, nil
+	}
 }
 
 func attrsFor(pixFmt string) *ffmpeg.FileAttrs {

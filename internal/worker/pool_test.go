@@ -8,8 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
+	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
 	"github.com/Raina-Hardik/smelt/internal/scanner"
 )
 
@@ -277,5 +279,79 @@ func TestPlanInplaceIgnoresOwnTransientFiles(t *testing.T) {
 	todo, skipped, _ := Plan(context.Background(), files, &config.Config{Codec: "h265", InPlace: true, AllowHDRLoss: true, Force: true}, nil)
 	if len(todo) != 1 || todo[0].Path != "/m/a.mkv" || skipped != 2 {
 		t.Fatalf("Plan = (todo %v, skipped %d), want only a.mkv with 2 skipped", todo, skipped)
+	}
+}
+
+func TestVerifyOutput(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "out.mkv")
+	if err := os.WriteFile(good, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(dir, "empty.mkv")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := probeHealth
+	t.Cleanup(func() { probeHealth = orig })
+
+	health := func(src, out *ffmpeg.FileHealth, outErr error) {
+		probeHealth = func(_ context.Context, path string) (*ffmpeg.FileHealth, error) {
+			if path == good {
+				return out, outErr
+			}
+			return src, nil
+		}
+	}
+	min := func(n int) time.Duration { return time.Duration(n) * time.Minute }
+
+	cases := []struct {
+		name    string
+		out     string
+		src     *ffmpeg.FileHealth
+		dst     *ffmpeg.FileHealth
+		dstErr  error
+		wantErr bool
+	}{
+		{"matching duration", good, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90)}, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90)}, nil, false},
+		{"within tolerance", good, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90)}, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90) + time.Second}, nil, false},
+		{"truncated output", good, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90)}, &ffmpeg.FileHealth{HasVideo: true, Duration: min(30)}, nil, true},
+		{"no video stream", good, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90)}, &ffmpeg.FileHealth{HasVideo: false, Duration: min(90)}, nil, true},
+		{"unreadable output", good, &ffmpeg.FileHealth{HasVideo: true, Duration: min(90)}, nil, errors.New("invalid data"), true},
+		{"empty file", empty, nil, nil, nil, true},
+		{"missing file", filepath.Join(dir, "nope.mkv"), nil, nil, nil, true},
+		{"source duration unknown", good, &ffmpeg.FileHealth{HasVideo: true}, &ffmpeg.FileHealth{HasVideo: true, Duration: min(5)}, nil, false},
+	}
+	for _, c := range cases {
+		health(c.src, c.dst, c.dstErr)
+		err := verifyOutput(context.Background(), "/m/src.mkv", c.out)
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err = %v, wantErr %v", c.name, err, c.wantErr)
+		}
+	}
+}
+
+// A symlink must never be replaced in place: the link would become a regular
+// file and its target would be encoded as a second copy.
+func TestPlanInplaceSkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real.mkv")
+	link := filepath.Join(dir, "link.mkv")
+	if err := os.WriteFile(real, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	files := []scanner.MediaFile{{Path: real}, {Path: link}}
+	todo, skipped, _ := Plan(context.Background(), files, &config.Config{Codec: "h265", InPlace: true, Force: true, AllowHDRLoss: true}, nil)
+	if len(todo) != 1 || todo[0].Path != real || skipped != 1 {
+		t.Fatalf("Plan = (todo %v, skipped %d), want only the real file", todo, skipped)
+	}
+
+	// Non-inplace runs write a new file and are unaffected.
+	todo, _, _ = Plan(context.Background(), files, &config.Config{Suffix: ".smelt", AllowHDRLoss: true}, nil)
+	if len(todo) != 2 {
+		t.Errorf("non-inplace must keep symlinked sources: %v", todo)
 	}
 }
