@@ -191,7 +191,7 @@ func buildArgs(src, dst string, spec EncodeSpec) []string {
 func streamMapArgs(spec EncodeSpec) []string {
 	args := []string{
 		"-map", "0:v:0", // primary video stream only (avoids multi-video-stream edge cases)
-		"-map", "0:a", // all audio streams (preserves multi-track/multi-lang)
+		"-map", "0:a?", // all audio streams (preserves multi-track/multi-lang); optional so audio-less sources encode
 	}
 	if strings.EqualFold(spec.SubtitleMode, "drop") {
 		args = append(args, "-sn")

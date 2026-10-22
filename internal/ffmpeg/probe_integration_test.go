@@ -93,3 +93,19 @@ func TestHDR10RoundTripIntegration(t *testing.T) {
 		}
 	}
 }
+
+// TestRunAudiolessSourceIntegration: a source with no audio stream must
+// transcode (the audio map is optional) rather than fail on `-map 0:a`.
+func TestRunAudiolessSourceIntegration(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "silent.mkv")
+	gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc=s=64x64:d=1", "-c:v", "libx264", src)
+	if err := gen.Run(); err != nil {
+		t.Skipf("cannot generate test media: %v", err)
+	}
+	dst := filepath.Join(dir, "out.mkv")
+	if err := Run(context.Background(), src, dst, EncodeSpec{Codec: "h264", CRF: 30, Preset: "ultrafast"}, nil); err != nil {
+		t.Fatalf("Run on audio-less source: %v", err)
+	}
+}
