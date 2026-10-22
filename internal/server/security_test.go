@@ -3,8 +3,11 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Program definitions arrive from an unauthenticated API and are rendered
@@ -104,5 +107,36 @@ func TestGuard(t *testing.T) {
 		if w.Code != c.want {
 			t.Errorf("%s: status = %d, want %d", c.name, w.Code, c.want)
 		}
+	}
+}
+
+// A program already in the database (stored before validation existed, or
+// written directly) must not be rendered into an executable script.
+func TestRunRefusesHostileStoredProgram(t *testing.T) {
+	e := newTestEnv(t)
+	marker := filepath.Join(t.TempDir(), "pwned")
+	rules := `[{"when":[],"do":{"cmd":"check","args":["|| true; touch ` + marker + ` ;"]}}]`
+	if err := e.db.CreateProgram("legacy", "legacy", "", "/nonexistent", "mkv", rules); err != nil {
+		t.Fatal(err)
+	}
+	w := e.do(http.MethodPost, "/api/programs/legacy/run", nil)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d (%s), want 422", w.Code, w.Body.String())
+	}
+	time.Sleep(300 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("hostile stored program was executed")
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.srv.scriptsDir, "smelt-*.sh")); len(left) != 0 {
+		t.Errorf("no script should have been written: %v", left)
+	}
+
+	// A clean stored program still runs.
+	good := `[{"when":[],"do":{"cmd":"skip","args":[]}}]`
+	if err := e.db.CreateProgram("ok", "ok", "", "/nonexistent", "mkv", good); err != nil {
+		t.Fatal(err)
+	}
+	if w := e.do(http.MethodPost, "/api/programs/ok/run", nil); w.Code != http.StatusAccepted {
+		t.Errorf("clean program: status = %d (%s), want 202", w.Code, w.Body.String())
 	}
 }

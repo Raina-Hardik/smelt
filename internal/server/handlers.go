@@ -287,6 +287,13 @@ func (s *Server) RunProgram(w http.ResponseWriter, r *http.Request, id api.Progr
 		Rules:    rules,
 	}
 
+	// Validate again at run time: rows written before input validation existed
+	// (or straight into the database) must not be rendered into a script.
+	if err := workflow.ValidateProgramInput(p.Name, p.Schedule, p.Src, p.Ext, p.Rules); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "stored program failed validation and was not run (recreate it): "+err.Error())
+		return
+	}
+
 	runID := uuid.New().String()
 	if err := s.triggerRun(runID, p); err != nil {
 		writeError(w, http.StatusInternalServerError, "start run: "+err.Error())
