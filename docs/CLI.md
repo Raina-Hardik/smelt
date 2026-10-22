@@ -1225,7 +1225,9 @@ smelt serve [flags]
 # Start on the default address
 smelt serve
 
-# Expose on all interfaces (e.g. inside a container)
+# Listen on all interfaces (e.g. inside a container). The API has no
+# authentication: publish the port on loopback only (-p 127.0.0.1:7700:7700)
+# or front it with an authenticating reverse proxy.
 smelt serve --addr 0.0.0.0:7700
 
 # Custom scripts directory
@@ -1280,12 +1282,20 @@ Global Flags:
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--addr` | string | `127.0.0.1:7700` | Address the server listens on. |
+| `--addr` | string | `127.0.0.1:7700` | Address the server listens on. The API is unauthenticated; keep it on loopback or behind an authenticating proxy. |
 | `--scripts-dir` | string | _(system temp)_ | Directory where rendered program scripts and their `.log` files are written. |
 
 ### API reference
 
 All endpoints return `Content-Type: application/json`. Error bodies are `{"error": "..."}`.
+
+Security model: the API is unauthenticated, and programs it stores are rendered
+into shell scripts that run as the server's user. To keep that safe:
+request bodies must be sent as `application/json` (`415` otherwise); program
+fields are validated (no control characters, actions limited to
+`transcode`/`check`/`skip`, action args limited to plain flag tokens such as
+`--codec h265`; `400` otherwise); a request with a cross-site `Origin`, or —
+when bound to loopback — a non-loopback `Host`, gets `403`.
 The tables below summarize `api/openapi.yaml`, the normative contract; when in
 doubt, or for a client-generation target (e.g. the WebUI's TypeScript client),
 read the spec itself — served live at `GET /openapi.yaml` — rather than this

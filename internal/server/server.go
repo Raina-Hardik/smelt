@@ -6,7 +6,10 @@ package server
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,7 +73,11 @@ func handleSpec(w http.ResponseWriter, _ *http.Request) {
 // shutdownTimeout; background program runs it already spawned are
 // independent subprocesses and keep running.
 func (s *Server) Start(ctx context.Context, addr string) error {
-	httpServer := &http.Server{Addr: addr, Handler: s.Handler()}
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           guard(s.Handler(), addr),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -93,4 +100,58 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 		}
 		return nil
 	}
+}
+
+// guard protects the unauthenticated API from being driven by a web page the
+// operator happens to visit:
+//
+//   - A request carrying an Origin header whose host differs from the Host
+//     header is a cross-site browser request and is refused (CSRF). CLI and
+//     script clients send no Origin and are unaffected.
+//   - When listening on a loopback address, the Host header must name a
+//     loopback host, which defeats DNS rebinding (an attacker's domain
+//     resolving to 127.0.0.1 still arrives with the attacker's Host).
+//
+// The API has no authentication of its own: bind it to loopback, or put it
+// behind an authenticating reverse proxy.
+func guard(next http.Handler, addr string) http.Handler {
+	loopbackOnly := isLoopbackAddr(addr)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || u.Host != r.Host {
+				writeError(w, http.StatusForbidden, "cross-origin request refused")
+				return
+			}
+		}
+		if loopbackOnly && !isLoopbackHost(r.Host) {
+			writeError(w, http.StatusForbidden, "unexpected Host header")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	return isLoopbackName(host)
+}
+
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	return isLoopbackName(strings.Trim(host, "[]"))
+}
+
+func isLoopbackName(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
