@@ -131,6 +131,10 @@ func initLogger() { configureLogger("info", "auto") }
 // level: debug|info|warn|error (unknown → info).
 // format: auto (pretty when stderr is a TTY) | json | pretty.
 func configureLogger(level, format string) {
+	// Durations (elapsed, eta, interval) log as fractional seconds; zerolog's
+	// default is unlabelled milliseconds.
+	zerolog.DurationFieldUnit = time.Second
+	zerolog.DurationFieldInteger = false
 	lvl, err := zerolog.ParseLevel(strings.ToLower(level))
 	if err != nil || level == "" {
 		lvl = zerolog.InfoLevel

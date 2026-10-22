@@ -2,6 +2,8 @@ package ffmpeg
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -52,5 +54,27 @@ func TestIsKnownHWAccel(t *testing.T) {
 	}
 	if IsKnownHWAccel("turbo") {
 		t.Error("IsKnownHWAccel(turbo) = true, want false")
+	}
+}
+
+// With --hwaccel auto and no usable hardware encoder, the requested codec must
+// be kept and encoded in software (regression: av1 used to become hevc).
+func TestResolveEncoderAutoKeepsRequestedCodec(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for codec, want := range map[string]string{
+		"av1":  "libsvtav1",
+		"h265": "libx265",
+		"h264": "libx264",
+	} {
+		enc, backend := ResolveEncoder(context.Background(), codec, "auto")
+		if enc != want || backend != "" {
+			t.Errorf("ResolveEncoder(%q, auto) = (%q, %q), want (%q, \"\")", codec, enc, backend, want)
+		}
 	}
 }
