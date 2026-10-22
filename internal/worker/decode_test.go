@@ -24,10 +24,11 @@ func newResolvedPool(cfg *config.Config, encoder, backend string) *Pool {
 
 func stubWorkerFFmpeg(t *testing.T) {
 	t.Helper()
-	origRun, origAttrs, origDecode, orig10 := ffmpegRun, probeAttrs, probeDecode, probeEncoder10Bit
+	origRun, origAttrs, origDecode, orig10, origHDR := ffmpegRun, probeAttrs, probeDecode, probeEncoder10Bit, probeHDR
 	t.Cleanup(func() {
-		ffmpegRun, probeAttrs, probeDecode, probeEncoder10Bit = origRun, origAttrs, origDecode, orig10
+		ffmpegRun, probeAttrs, probeDecode, probeEncoder10Bit, probeHDR = origRun, origAttrs, origDecode, orig10, origHDR
 	})
+	probeHDR = func(ctx context.Context, path string) (*ffmpeg.HDRInfo, error) { return nil, nil }
 }
 
 func attrsFor(pixFmt string) *ffmpeg.FileAttrs {
