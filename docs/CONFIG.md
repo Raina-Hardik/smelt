@@ -618,22 +618,23 @@ transcode:
 | CLI flag | `--chunk-duration` |
 | Env var | `SMELT_CHUNK_DURATION` |
 
-Splits each source at keyframes into segments of about this length, encodes
-each segment in its own ffmpeg process, then joins them. It bounds the
-*duration* of any single ffmpeg process — aimed at thermally limited hardware
-— and complements `decode_threads`/`workers`, which cap how hard ffmpeg runs.
-Minimum `10s`; sources shorter than twice the chunk length, or without enough
-keyframes to split, are encoded in one pass.
+Splits each source into time ranges of about this length, encodes each range
+in its own ffmpeg process, then joins them. It bounds the *duration* of any
+single ffmpeg process — aimed at thermally limited hardware — and complements
+`decode_threads`/`workers`, which cap how hard ffmpeg runs. Minimum `10s`;
+sources shorter than twice the chunk length are encoded in one pass.
 
-How it works: the video stream is split with stream copy (so cuts land on
-keyframes), each segment is encoded video-only with the run's normal video
-settings (`extra_args` apply per segment), and the encoded segments are
-concatenated with audio and subtitles taken from the original file — audio is
-therefore processed once, with no segment seams. HDR10 colour tags and
-metadata are preserved. Segments live in `<name>.transcoded.chunks` next to the
-output and need roughly 2× the source's size in free space; the directory is
-removed on success, failure and cancel, and `smelt clean` removes it after a
-hard kill.
+How it works: each range is read from the original with `-ss`/`-t` and encoded
+video-only with the run's normal video settings. Cuts are decoded, not
+stream-copied, so they are frame-accurate and no frames are lost at
+boundaries — copying at keyframes would drop the leading B-frames of every
+open-GOP segment. The encoded chunks are then concatenated with audio and
+subtitles taken from the original file, so audio is processed once, with no
+seams. HDR10 colour tags and metadata are preserved. `extra_args` apply to the
+per-chunk video encode only; audio-side arguments have no effect in chunked
+mode. Chunks live in `<name>.transcoded.chunks` next to the output and need
+roughly the output's size in extra free space; the directory is removed on
+success, failure and cancel, and `smelt clean` removes it after a hard kill.
 
 ```yaml
 transcode:

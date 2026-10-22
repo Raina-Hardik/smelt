@@ -17,7 +17,7 @@ everything — fast, observable, and cancellable.
 - **Hardware acceleration** — `--hwaccel auto` functionally probes for a usable GPU encoder (NVENC / QSV / VAAPI / AMF / VideoToolbox) and falls back to software; on NVENC/QSV/VAAPI, decode runs on the same device too when a per-file probe confirms the source is decodable there (`--hwdecode auto`, opt out with `off`)
 - **Interactive TUI** — editable pre-flight screen, live per-file progress bars, file queue, pause/resume, clean cancellation
 - **HDR10 preservation** — HDR10/HLG sources keep their colour tags (primaries, transfer, matrix, range) and HDR10 static metadata (mastering display, MaxCLL/MaxFALL) through re-encodes; always on, no flag. Use h265 or av1 targets — H.264 can't reliably carry 10-bit HDR and logs a warning
-- **Chunked transcode** — `--chunk-duration 10m [--chunk-cooldown 30s]` splits long files at keyframes and encodes each piece in its own ffmpeg process with a cool-down gap, bounding how long any one process runs on thermally limited hardware
+- **Chunked transcode** — `--chunk-duration 10m [--chunk-cooldown 30s]` splits long files into time ranges and encodes each piece in its own ffmpeg process with a cool-down gap, bounding how long any one process runs on thermally limited hardware
 - **Audio control** — stream-copy by default, or re-encode with `--audio-codec` / `--audio-bitrate`
 - **Container conversion** — retarget the container with `--to mp4|mkv|webm` (mp4 gets faststart + hvc1)
 - **Idempotent re-runs** — skips files already produced, or (with `--inplace`) files already in the target codec
@@ -218,10 +218,10 @@ auto-retry in software — if that happens at scale, lower `--workers`.
 
 For very long files, `--chunk-duration` (optionally with `--chunk-cooldown`)
 bounds the *duration* of any single ffmpeg process instead of its intensity:
-the file is split at keyframes, each segment is encoded in its own process with
-a cool-down gap between them, and the pieces are joined with audio and
-subtitles taken from the original. It needs roughly 2x the source's size in
-free space beside the output while a file is in flight.
+the file is cut into frame-accurate time ranges, each encoded in its own
+process with a cool-down gap between them, and the pieces are joined with
+audio and subtitles taken from the original. It needs roughly the output's
+size in extra free space beside it while a file is in flight.
 
 Beyond that, smelt has no CPU/thermal governor of its own, on any platform —
 `--hwdecode`, `--decode-threads`, `--workers`, and `--chunk-duration` are the
