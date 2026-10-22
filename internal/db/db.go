@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -95,26 +96,40 @@ CREATE TABLE IF NOT EXISTS programs (
 );
 `
 
-// Open opens (or creates) the SQLite database at path.
-// WAL mode is enabled for concurrent reads during writes.
+// connPragmas are applied to every connection the pool opens, via the DSN.
+// Running them once with Exec only configures whichever pooled connection
+// happens to serve it: all others would have busy_timeout=0 and
+// foreign_keys=OFF, so concurrent writers (worker goroutines, plus the server
+// and CLI processes sharing the file) fail with SQLITE_BUSY and lose rows.
+var connPragmas = []string{
+	"journal_mode(WAL)",
+	"synchronous(NORMAL)",
+	"busy_timeout(5000)",
+	"foreign_keys(1)",
+}
+
+// dsn builds a SQLite URI for path with connPragmas applied per connection.
+// Going through url.URL escapes characters (spaces, '?', '#') that would
+// otherwise be read as URI syntax.
+func dsn(path string) string {
+	q := url.Values{}
+	for _, p := range connPragmas {
+		q.Add("_pragma", p)
+	}
+	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
+	return u.String()
+}
+
+// Open opens (or creates) the SQLite database at path. WAL mode is enabled for
+// concurrent reads during writes, and every pooled connection gets a busy
+// timeout so concurrent writers wait instead of failing.
 func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	conn, err := sql.Open("sqlite", path)
+	conn, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, err
-	}
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-	} {
-		if _, err := conn.Exec(pragma); err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
 	}
 	if _, err := conn.Exec(schema); err != nil {
 		_ = conn.Close()
