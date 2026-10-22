@@ -48,6 +48,9 @@ type EncodeSpec struct {
 	// SourceBitDepth is 10 for 10-bit sources riding the hardware pipeline
 	// (drives p010 upload and the encoder's main10 profile flag); 0/8 otherwise.
 	SourceBitDepth int
+	// HDR is the source's HDR signalling (nil for SDR). When set, colour tags
+	// and static metadata are carried through the encode.
+	HDR *HDRInfo
 }
 
 // ExecError means ffmpeg ran but exited non-zero.
@@ -172,6 +175,7 @@ func buildArgs(src, dst string, spec EncodeSpec) []string {
 	args = append(args, streamMapArgs(spec)...)
 	args = append(args, videoFilterArgs(spec)...)
 	args = append(args, rateControlArgs(spec)...)
+	args = append(args, hdrArgs(spec)...)
 	args = append(args, audioArgs(spec)...)
 	args = append(args, containerArgs(spec)...)
 	args = append(args, spec.ExtraArgs...)

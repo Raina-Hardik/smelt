@@ -16,6 +16,7 @@ everything — fast, observable, and cancellable.
 - **Parallel transcoding** — semaphore-gated worker pool, configurable to any concurrency level
 - **Hardware acceleration** — `--hwaccel auto` functionally probes for a usable GPU encoder (NVENC / QSV / VAAPI / AMF / VideoToolbox) and falls back to software; on NVENC/QSV/VAAPI, decode runs on the same device too when a per-file probe confirms the source is decodable there (`--hwdecode auto`, opt out with `off`)
 - **Interactive TUI** — editable pre-flight screen, live per-file progress bars, file queue, pause/resume, clean cancellation
+- **HDR10 preservation** — HDR10/HLG sources keep their colour tags (primaries, transfer, matrix, range) and HDR10 static metadata (mastering display, MaxCLL/MaxFALL) through re-encodes; always on, no flag. Use h265 or av1 targets — H.264 can't reliably carry 10-bit HDR and logs a warning
 - **Audio control** — stream-copy by default, or re-encode with `--audio-codec` / `--audio-bitrate`
 - **Container conversion** — retarget the container with `--to mp4|mkv|webm` (mp4 gets faststart + hvc1)
 - **Idempotent re-runs** — skips files already produced, or (with `--inplace`) files already in the target codec
@@ -264,9 +265,9 @@ occasionally outlive a first `SIGKILL` attempt (e.g. stuck in
 The core tool targets straightforward container/codec transcoding. Complex
 source material — Dolby Vision, HDR10(+), multi-layer/multi-track editorial
 formats — has failure modes the simple ffmpeg pipeline doesn't handle: a
-naive re-encode silently drops the DV RPU layer, mangles mastering-display
-metadata, or otherwise degrades the source. These are real gaps, not
-oversights, and they're intentionally out of scope for now.
+naive re-encode silently drops the DV RPU layer or otherwise degrades the
+source. These are real gaps, not oversights, and they're intentionally out of
+scope for now.
 
 Ideas being considered for a later "surgical mode" — a separate,
 explicitly-opted-into path for source-aware handling, distinct from the
@@ -274,9 +275,9 @@ default transcode flow:
 
 - **Dolby Vision passthrough** — extract/inject RPU via `dovi_tool` around
   the encode (profile 8.1 today; others later) instead of dropping the layer.
-- **HDR10/HDR10+ metadata preservation** — carry mastering-display and
-  content-light-level (and HDR10+ dynamic) metadata through re-encodes
-  instead of losing it.
+- **HDR10+ dynamic metadata** — HDR10 static metadata (mastering display,
+  MaxCLL/MaxFALL) and colour tags are already preserved on every transcode;
+  HDR10+ per-scene dynamic metadata is not yet carried through.
 - **Source-complexity detection** — probe for these cases up front and warn
   (or refuse) rather than silently producing a degraded file.
 - Possible shape: a `--preserve-dv` / `--surgical` flag or a dedicated

@@ -639,8 +639,10 @@ Required to transcode a source carrying a Dolby Vision RPU (detected via
 `ffprobe`'s DOVI configuration record). Without it, matching files are
 excluded from the plan and counted separately from `skipped` — smelt has no
 DV passthrough, so a plain re-encode would silently drop the RPU layer. Set
-this only once you've made that call knowingly; it does not affect static
-HDR10/HDR10+ metadata, which is a separate, currently undetected gap (see
+this only once you've made that call knowingly. It does not affect HDR10:
+colour tags and static metadata (mastering display, MaxCLL/MaxFALL) are
+detected and preserved automatically on every transcode. HDR10+ dynamic
+metadata is not carried through (see
 [Planned / Under Consideration](../README.md#planned--under-consideration)
 in the README).
 

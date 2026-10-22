@@ -36,6 +36,7 @@ smelt/
     │   └── db.go            Open(WAL) — full state plane: transcodes, runs, jobs, programs tables + query API
     ├── ffmpeg/
     │   ├── runner.go        Run(EncodeSpec) — exec wrapper, progress parsing, typed errors
+    │   ├── hdr.go           ProbeHDR + hdrArgs — HDR10/HLG colour tags and static metadata carried through re-encodes
     │   ├── accel.go         ResolveEncoder() — functional HW-encoder probe + fallback
     │   └── accel_{linux,darwin,windows}.go  per-GOOS hwPriority + vaapiDevice
     ├── worker/

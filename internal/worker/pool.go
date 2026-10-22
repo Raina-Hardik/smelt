@@ -30,6 +30,7 @@ var lookPath = exec.LookPath
 var (
 	ffmpegRun         = ffmpeg.Run
 	probeAttrs        = ffmpeg.ProbeAttrs
+	probeHDR          = ffmpeg.ProbeHDR
 	probeDecode       = ffmpeg.ProbeDecode
 	probeEncoder10Bit = ffmpeg.ProbeEncoder10Bit
 )
@@ -335,6 +336,7 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		Backend:       p.backend,
 	}
 	attrs := p.decideDecode(ctx, f.Path, &spec)
+	p.applyHDR(ctx, f.Path, &spec)
 
 	start := time.Now()
 	err = ffmpegRun(ctx, f.Path, tmp, spec, onProgress)
@@ -372,6 +374,23 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 	}
 	p.record(f, dst, spec, time.Since(start), nil)
 	return nil
+}
+
+// applyHDR carries an HDR source's colour tags and static metadata onto spec.
+// A probe failure leaves spec untouched (the file is treated as SDR). H.264
+// cannot carry 10-bit HDR through the common 8-bit builds, so that target is
+// flagged instead of silently degrading.
+func (p *Pool) applyHDR(ctx context.Context, path string, spec *ffmpeg.EncodeSpec) {
+	hdr, err := probeHDR(ctx, path)
+	if err != nil || hdr == nil {
+		return
+	}
+	spec.HDR = hdr
+	if ffmpeg.CodecName(spec.Codec) == "h264" {
+		log.Warn().Str("file", path).Msg("HDR source with an H.264 target: H.264 cannot reliably carry 10-bit HDR; use --codec h265 or av1 to keep it")
+		return
+	}
+	log.Info().Str("file", path).Str("transfer", hdr.ColorTransfer).Bool("static_metadata", hdr.HasStaticMetadata()).Msg("HDR source: preserving colour tags and metadata")
 }
 
 // decideDecode settles the per-file video pipeline on spec: bit-depth routing
