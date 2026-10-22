@@ -210,3 +210,93 @@ func TestRunChunkedPreservesHDR10Integration(t *testing.T) {
 		t.Errorf("static metadata lost: %+v / %+v", out, out.Mastering)
 	}
 }
+
+// framesOf counts decoded video frames; chunking must never change the count.
+func framesOf(t *testing.T, path string) string {
+	t.Helper()
+	out, err := exec.Command("ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+		"-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestChunkedMatchesSinglePassIntegration is the regression suite for real
+// sources: open-GOP HEVC with B-frames, 29.97 fps, two audio tracks and a
+// subtitle track. A chunked encode must keep exactly the frames, streams and
+// duration of a single-pass encode, for relative paths, mkv/mp4 and h265/av1.
+func TestChunkedMatchesSinglePassIntegration(t *testing.T) {
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "s.srt")
+	if err := os.WriteFile(srt, []byte("1\n00:00:01,000 --> 00:00:03,000\nhello\n\n2\n00:00:25,000 --> 00:00:28,000\nworld\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "real.mkv")
+	gen := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=s=320x180:d=40:r=30000/1001",
+		"-f", "lavfi", "-i", "sine=d=40", "-f", "lavfi", "-i", "sine=f=880:d=40", "-i", srt,
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3",
+		"-c:v", "libx265", "-preset", "ultrafast", "-x265-params",
+		"open-gop=1:bframes=4:rc-lookahead=10:keyint=250:min-keyint=60:log-level=error",
+		"-c:a", "aac", "-c:s", "srt", src)
+	if err := gen.Run(); err != nil {
+		t.Skipf("cannot generate test media: %v", err)
+	}
+	ctx := context.Background()
+
+	cases := []struct {
+		name, codec, ext string
+		subs             string
+	}{
+		{"h265 mkv", "h265", "mkv", "copy"},
+		{"av1 mkv", "av1", "mkv", "copy"},
+		{"h265 mp4 drops subs", "h265", "mp4", "drop"}, // mp4 can't hold srt
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			base := EncodeSpec{Codec: c.codec, CRF: 32, Preset: "ultrafast", SubtitleMode: c.subs, Container: c.ext}
+			if c.codec == "av1" {
+				base.Preset = "12"
+			}
+			single := filepath.Join(dir, "single."+c.codec+"."+c.ext)
+			if err := Run(ctx, src, single, base, nil); err != nil {
+				t.Fatalf("single pass: %v", err)
+			}
+			chunked := base
+			chunked.ChunkDuration = 10 * time.Second
+			dst := filepath.Join(dir, "chunk."+c.codec+".transcoded."+c.ext)
+			if err := Run(ctx, src, dst, chunked, nil); err != nil {
+				t.Fatalf("chunked: %v", err)
+			}
+			if a, b := framesOf(t, single), framesOf(t, dst); a != b {
+				t.Errorf("frame count: single=%s chunked=%s", a, b)
+			}
+			dur := func(p string) time.Duration { d, _ := probeDuration(ctx, p); return d }
+			if d1, d2 := dur(single), dur(dst); d2 < d1-100*time.Millisecond || d2 > d1+100*time.Millisecond {
+				t.Errorf("duration: single=%v chunked=%v", d1, d2)
+			}
+			streams := func(p string) string {
+				out, _ := exec.Command("ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", p).Output()
+				return string(out)
+			}
+			if a, b := streams(single), streams(dst); a != b {
+				t.Errorf("stream layout: single=%q chunked=%q", a, b)
+			}
+		})
+	}
+
+	// A relative source path must work: the concat list resolves entries
+	// relative to its own directory.
+	t.Run("relative path", func(t *testing.T) {
+		wd, _ := os.Getwd()
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(wd) }()
+		spec := EncodeSpec{Codec: "h265", CRF: 32, Preset: "ultrafast", SubtitleMode: "drop", ChunkDuration: 10 * time.Second}
+		if err := Run(ctx, "real.mkv", "rel.transcoded.mkv", spec, nil); err != nil {
+			t.Fatalf("relative chunked run: %v", err)
+		}
+	})
+}

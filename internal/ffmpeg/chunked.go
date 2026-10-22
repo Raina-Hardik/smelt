@@ -5,18 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
 
-// Segment and work-file names end in ".transcoded" before the extension so the
+// Encoded-segment names end in ".transcoded" before the extension so the
 // worker's own-output filter never mistakes them for new sources.
-const (
-	segGlob   = "seg*.transcoded.mkv"
-	segFormat = "seg%05d.transcoded.mkv"
-	encFormat = "enc%05d.transcoded.mkv"
-)
+const encFormat = "enc%05d.transcoded.mkv"
 
 // ChunkDirSuffix is appended to the transient output path (minus extension) to
 // name the per-file segment work directory, e.g. "movie.transcoded.chunks".
@@ -26,19 +21,48 @@ func chunkDir(dst string) string {
 	return strings.TrimSuffix(dst, filepath.Ext(dst)) + ChunkDirSuffix
 }
 
-// runChunked transcodes src in keyframe-aligned segments to bound how long any
-// single ffmpeg process runs (useful on thermally limited hardware):
+// chunkRange is one time range of the source. length 0 means "to end of file".
+type chunkRange struct {
+	start, length time.Duration
+}
+
+// planChunks divides total into ranges of chunk, the last absorbing the
+// remainder so no tiny trailing chunk is produced. It returns nil when total
+// is too short for at least two chunks.
+func planChunks(total, chunk time.Duration) []chunkRange {
+	n := int(total / chunk)
+	if n < 2 {
+		return nil
+	}
+	out := make([]chunkRange, n)
+	for i := range out {
+		out[i] = chunkRange{start: time.Duration(i) * chunk, length: chunk}
+	}
+	out[n-1].length = 0
+	return out
+}
+
+// runChunked transcodes src in time-range chunks to bound how long any single
+// ffmpeg process runs (useful on thermally limited hardware):
 //
-//  1. split the video stream with -c copy into ~ChunkDuration segments,
-//  2. encode each segment video-only in its own process, pausing
-//     ChunkCooldown between them,
-//  3. concatenate the encoded segments and mux audio and subtitles straight
-//     from the original source, so audio is processed exactly once and never
-//     suffers per-segment seams.
+//  1. each ~ChunkDuration range is encoded video-only by its own process
+//     reading the original with -ss/-t, pausing ChunkCooldown between them,
+//  2. the encoded chunks are concatenated, with audio and subtitles taken
+//     straight from the original, so audio is processed exactly once and
+//     never suffers per-chunk seams.
 //
-// done=false with a nil error means the source could not be split into more
-// than one segment and the caller should do a normal single-pass encode.
+// Chunks are cut by decoding, not by stream copy: copying at keyframes drops
+// the leading B-frames of every open-GOP segment (common in HEVC), silently
+// losing frames at each boundary. The ranges partition the timeline, so every
+// source frame lands in exactly one chunk.
+//
+// done=false with a nil error means the source is too short to chunk and the
+// caller should do a normal single-pass encode.
 func runChunked(ctx context.Context, src, dst string, spec EncodeSpec, total time.Duration, onProgress func(ProgressEvent)) (done bool, err error) {
+	chunks := planChunks(total, spec.ChunkDuration)
+	if chunks == nil {
+		return false, nil
+	}
 	dir := chunkDir(dst)
 	if err := os.RemoveAll(dir); err != nil {
 		return false, &OSError{FilePath: src, Err: err}
@@ -48,30 +72,8 @@ func runChunked(ctx context.Context, src, dst string, spec EncodeSpec, total tim
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	if err := execFFmpeg(ctx, src, splitArgs(src, dir, spec.ChunkDuration), 0, nil); err != nil {
-		return false, err
-	}
-	segs, err := filepath.Glob(filepath.Join(dir, segGlob))
-	if err != nil {
-		return false, &OSError{FilePath: src, Err: err}
-	}
-	sort.Strings(segs)
-	if len(segs) < 2 {
-		return false, nil
-	}
-
-	durs := make([]time.Duration, len(segs))
-	for i, seg := range segs {
-		if d, err := probeDuration(ctx, seg); err == nil && d > 0 {
-			durs[i] = d
-		} else {
-			durs[i] = spec.ChunkDuration
-		}
-	}
-
-	var offset time.Duration
-	encoded := make([]string, len(segs))
-	for i, seg := range segs {
+	names := make([]string, len(chunks))
+	for i, c := range chunks {
 		if i > 0 && spec.ChunkCooldown > 0 {
 			select {
 			case <-ctx.Done():
@@ -79,16 +81,22 @@ func runChunked(ctx context.Context, src, dst string, spec EncodeSpec, total tim
 			case <-time.After(spec.ChunkCooldown):
 			}
 		}
-		encoded[i] = filepath.Join(dir, fmt.Sprintf(encFormat, i))
-		err := execFFmpeg(ctx, src, segmentArgs(seg, encoded[i], spec), durs[i], chunkProgress(src, offset, total, onProgress))
-		if err != nil {
+		names[i] = fmt.Sprintf(encFormat, i)
+		length := c.length
+		if length == 0 {
+			length = total - c.start
+		}
+		args := segmentArgs(src, filepath.Join(dir, names[i]), c, spec)
+		if err := execFFmpeg(ctx, src, args, length, chunkProgress(src, c.start, total, onProgress)); err != nil {
 			return false, err
 		}
-		offset += durs[i]
 	}
 
 	list := filepath.Join(dir, "list.txt")
-	if err := os.WriteFile(list, []byte(concatList(encoded)), 0o644); err != nil {
+	// The concat demuxer resolves entries relative to the list file's own
+	// directory, so list bare file names: a relative --src would otherwise
+	// double the path.
+	if err := os.WriteFile(list, []byte(concatList(names)), 0o644); err != nil {
 		return false, &OSError{FilePath: src, Err: err}
 	}
 	if err := execFFmpeg(ctx, src, joinArgs(list, src, dst, spec), 0, nil); err != nil {
@@ -100,25 +108,18 @@ func runChunked(ctx context.Context, src, dst string, spec EncodeSpec, total tim
 	return true, nil
 }
 
-// splitArgs cuts src's primary video stream into keyframe-aligned segments.
-func splitArgs(src, dir string, chunk time.Duration) []string {
-	return []string{
-		"-hide_banner", "-loglevel", "error",
-		"-i", src,
-		"-map", "0:v:0", "-c", "copy", "-an", "-sn",
-		"-f", "segment",
-		"-segment_time", fmt.Sprintf("%.3f", chunk.Seconds()),
-		"-reset_timestamps", "1",
-		"-y", filepath.Join(dir, segFormat),
-	}
-}
-
-// segmentArgs encodes one video-only segment with the run's video settings.
-// Audio and subtitles are handled once, in the final join.
-func segmentArgs(seg, dst string, spec EncodeSpec) []string {
+// segmentArgs encodes one video-only time range of src with the run's video
+// settings. -ss/-t are input options: ffmpeg seeks to the previous keyframe
+// and discards up to the exact start, so cuts are frame-accurate. Audio and
+// subtitles are handled once, in the final join.
+func segmentArgs(src, dst string, c chunkRange, spec EncodeSpec) []string {
 	args := []string{"-hide_banner"}
 	args = append(args, preInputArgs(spec)...)
-	args = append(args, "-i", seg, "-map", "0:v:0", "-an", "-sn")
+	args = append(args, "-ss", fmt.Sprintf("%.3f", c.start.Seconds()))
+	if c.length > 0 {
+		args = append(args, "-t", fmt.Sprintf("%.3f", c.length.Seconds()))
+	}
+	args = append(args, "-i", src, "-map", "0:v:0", "-an", "-sn")
 	args = append(args, videoFilterArgs(spec)...)
 	args = append(args, rateControlArgs(spec)...)
 	args = append(args, hdrArgs(spec)...)

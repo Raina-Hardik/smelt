@@ -237,7 +237,7 @@ func addTranscodeFlags(cmd *cobra.Command) {
 	)
 	cmd.Flags().Duration(
 		"chunk-duration", 0,
-		"split each source at keyframes into segments of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly 2x the source's size in free space next to the output while a file is in flight",
+		"split each source into time ranges of about this length (e.g. 10m), encoding each in its own ffmpeg process; bounds how long any one process runs on thermally limited hardware (0 = off, minimum 10s). Needs roughly the output's size in extra free space next to it while a file is in flight",
 	)
 	cmd.Flags().Duration(
 		"chunk-cooldown", 0,

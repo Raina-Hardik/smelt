@@ -7,18 +7,30 @@ import (
 	"time"
 )
 
-func TestSplitArgs(t *testing.T) {
-	got := strings.Join(splitArgs("/m/in.mkv", "/m/w", 90*time.Second), " ")
-	for _, want := range []string{"-i /m/in.mkv", "-map 0:v:0", "-c copy", "-an -sn", "-f segment", "-segment_time 90.000", "-reset_timestamps 1", "/m/w/seg%05d.transcoded.mkv"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("splitArgs missing %q in %s", want, got)
+func TestPlanChunks(t *testing.T) {
+	if got := planChunks(15*time.Second, 10*time.Second); got != nil {
+		t.Errorf("too short to chunk: %v", got)
+	}
+	got := planChunks(35*time.Second, 10*time.Second)
+	want := []chunkRange{{0, 10 * time.Second}, {10 * time.Second, 10 * time.Second}, {20 * time.Second, 0}}
+	if !slices.Equal(got, want) {
+		t.Errorf("planChunks(35s,10s) = %v, want %v (last absorbs remainder)", got, want)
+	}
+	// Ranges must partition the timeline: each start is the previous end.
+	for i := 1; i < len(got); i++ {
+		if got[i].start != got[i-1].start+got[i-1].length {
+			t.Errorf("gap/overlap between chunk %d and %d: %v", i-1, i, got)
 		}
 	}
 }
 
 func TestSegmentArgsVideoOnly(t *testing.T) {
 	spec := EncodeSpec{Codec: "h265", CRF: 22, Preset: "medium", AudioCodec: "aac", SubtitleMode: "copy", ExtraArgs: []string{"-vf", "scale=1280:-2"}}
-	args := segmentArgs("seg.mkv", "enc.mkv", spec)
+	args := segmentArgs("in.mkv", "enc.mkv", chunkRange{start: 90 * time.Second, length: 30 * time.Second}, spec)
+	got := strings.Join(args, " ")
+	if !strings.Contains(got, "-ss 90.000 -t 30.000 -i in.mkv") {
+		t.Errorf("range must be input options before -i: %s", got)
+	}
 	for _, want := range []string{"-an", "-sn", "-c:v", "libx265", "-crf", "22", "-vf", "scale=1280:-2"} {
 		if !slices.Contains(args, want) {
 			t.Errorf("segmentArgs missing %q: %v", want, args)
@@ -31,6 +43,11 @@ func TestSegmentArgsVideoOnly(t *testing.T) {
 	}
 	if args[len(args)-1] != "enc.mkv" {
 		t.Errorf("destination not last: %v", args)
+	}
+
+	last := strings.Join(segmentArgs("in.mkv", "enc.mkv", chunkRange{start: 90 * time.Second}, spec), " ")
+	if strings.Contains(last, "-t ") {
+		t.Errorf("last chunk runs to EOF, must have no -t: %s", last)
 	}
 }
 
