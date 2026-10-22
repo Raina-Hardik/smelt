@@ -633,27 +633,46 @@ single ffmpeg process — aimed at thermally limited hardware — and complement
 `decode_threads`/`workers`, which cap how hard ffmpeg runs. Minimum `10s`;
 sources shorter than twice the chunk length are encoded in one pass.
 
-How it works: each range is read from the original with `-ss`/`-t` and encoded
-video-only with the run's normal video settings. Cuts are decoded, not
-stream-copied, so they are frame-accurate and no frames are lost at
-boundaries — copying at keyframes would drop the leading B-frames of every
-open-GOP segment. The encoded chunks are then concatenated with audio and
-subtitles taken from the original file, so audio is processed once, with no
-seams. Global metadata, chapters and the video's start offset are carried
-over from the original, and HDR10 colour tags and metadata are preserved.
+How it works: the source's frame timestamps are read once (demux only, no
+decode) and chunk boundaries are placed midway between two real frames, so no
+frame sits on a cut. Each range is read from the original with `-ss`/`-t` and
+encoded video-only with the run's normal video settings. Cuts are decoded, not
+stream-copied, so they are frame-accurate — copying at keyframes would drop the
+leading B-frames of every open-GOP segment. The encoded chunks are then
+concatenated, with each chunk's duration taken from the source timestamps so
+seams land exactly where the source's frames were, and audio and subtitles
+taken from the original file, so audio is processed once, with no seams.
+Global metadata, chapters and the video's start offset are carried over from the
+original, and HDR10 colour tags and metadata are preserved.
 
-`extra_args` apply to the per-chunk video encode only: audio, container and
-metadata arguments (`-b:a`, `-movflags`, `-metadata`, …) have no effect in
-chunked mode. Arguments that change the timeline or stream selection (`-ss`,
-`-t`, `-to`, `-r`, `-map`, `-filter_complex`, `fps`/`trim`/`setpts` filters,
-…) cannot be applied per chunk, so smelt warns and encodes that run in a single
-pass instead of producing a different file.
+Every chunk is **verified**: it must contain exactly the number of frames the
+source has in that range. Hardware decoders do not always honour a seek
+exactly — Intel QSV returns extra frames — so a miscounted chunk is redone with
+software decode (and the rest of that file stays on software decode, with a
+warning). If software decode still disagrees, the file is encoded in a single
+pass instead; a wrong chunk is never joined into the output.
 
-Chunks live in `<name>.transcoded.<ext>.chunks` next to the output (so
-sources that share a base name never share a directory) and need roughly the
-output's size in extra free space. The directory is removed on success, failure
-and cancel; `smelt clean` removes leftovers after a hard kill, but only
-directories containing smelt's `.smelt-chunks` marker file.
+`extra_args` are split by purpose. Video-encode arguments (`-vf scale=…`,
+`-x265-params`, `-pix_fmt`, …) apply to every chunk; container, metadata and
+audio/subtitle arguments (`-metadata`, `-movflags`, `-disposition`, `-b:a`,
+`-af`, `-tag:v`, …) are applied once, in the final join, exactly as in a single
+pass. Arguments that change the timeline or stream selection (`-ss`, `-t`,
+`-to`, `-r`, `-map`, `-filter_complex`, `fps`/`trim`/`setpts` filters, …) cannot
+be applied per chunk, so smelt warns and encodes that run in a single pass
+instead of producing a different file.
+
+**Resume.** Chunks live in `<name>.transcoded.<ext>.chunks` next to the output
+(so sources that share a base name never share a directory) and need roughly
+the output's size in extra free space. If a run is interrupted — Ctrl-C,
+SIGTERM, a crash — after at least one chunk has finished, the directory is
+kept, and the next run of the same file with the same video settings resumes
+from the finished chunks. A fingerprint of the source file (size and mtime),
+the video settings and the chunk plan guards this: change the file, the codec,
+the CRF, the preset, or a video argument and the old chunks are discarded.
+Audio, subtitle and container settings do not affect chunks and do not
+invalidate them. The directory is removed on success and on any other failure.
+`smelt clean` removes leftovers, but only directories containing smelt's
+`.smelt-chunks` marker file.
 
 ```yaml
 transcode:

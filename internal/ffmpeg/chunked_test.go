@@ -15,7 +15,7 @@ func TestPlanChunks(t *testing.T) {
 		t.Errorf("too short to chunk: %v", got)
 	}
 	got := planChunks(35*time.Second, 10*time.Second, 0)
-	want := []chunkRange{{0, 0, 10 * time.Second}, {10 * time.Second, 10 * time.Second, 10 * time.Second}, {20 * time.Second, 20 * time.Second, 0}}
+	want := []chunkRange{{seek: 0, offset: 0, length: 10 * time.Second}, {seek: 10 * time.Second, offset: 10 * time.Second, length: 10 * time.Second}, {seek: 20 * time.Second, offset: 20 * time.Second}}
 	if !slices.Equal(got, want) {
 		t.Errorf("planChunks(35s,10s) = %v, want %v (last absorbs remainder)", got, want)
 	}
@@ -31,7 +31,7 @@ func TestSegmentArgsVideoOnly(t *testing.T) {
 	spec := EncodeSpec{Codec: "h265", CRF: 22, Preset: "medium", AudioCodec: "aac", SubtitleMode: "copy", ExtraArgs: []string{"-vf", "scale=1280:-2"}}
 	args := segmentArgs("in.mkv", "enc.mkv", chunkRange{seek: 90 * time.Second, offset: 90 * time.Second, length: 30 * time.Second}, spec)
 	got := strings.Join(args, " ")
-	if !strings.Contains(got, "-ss 90.000 -t 30.000 -i in.mkv") {
+	if !strings.Contains(got, "-ss 90.000000 -t 30.000000 -i in.mkv") {
 		t.Errorf("range must be input options before -i: %s", got)
 	}
 	for _, want := range []string{"-an", "-sn", "-c:v", "libx265", "-crf", "22", "-vf", "scale=1280:-2"} {
@@ -76,7 +76,7 @@ func TestJoinArgs(t *testing.T) {
 }
 
 func TestConcatListEscapesQuotes(t *testing.T) {
-	got := concatList([]string{"/a/enc0.mkv", "/b/it's.mkv"})
+	got := concatList([]string{"/a/enc0.mkv", "/b/it's.mkv"}, nil)
 	want := "file '/a/enc0.mkv'\nfile '/b/it'\\''s.mkv'\n"
 	if got != want {
 		t.Errorf("concatList = %q, want %q", got, want)
@@ -180,27 +180,139 @@ func TestPrepareChunkDirRefusesForeignDirectories(t *testing.T) {
 	if err := os.WriteFile(keep, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareChunkDir(foreign); err == nil {
+	if _, err := prepareChunkDir(foreign, "k"); err == nil {
 		t.Error("must refuse a pre-existing directory without smelt's marker")
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("foreign directory contents must be untouched: %v", err)
 	}
+}
 
-	own := filepath.Join(root, "own.chunks")
-	if err := prepareChunkDir(own); err != nil {
+func TestPrepareChunkDirResumesOnlyMatchingKey(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "own.chunks")
+	if resumed, err := prepareChunkDir(dir, "key-A"); err != nil || resumed {
+		t.Fatalf("fresh dir: resumed=%v err=%v", resumed, err)
+	}
+	done := filepath.Join(dir, "enc00000.transcoded.mkv")
+	part := filepath.Join(dir, "enc00001.part.transcoded.mkv")
+	list := filepath.Join(dir, "list.txt")
+	for _, f := range []string{done, part, list} {
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resumed, err := prepareChunkDir(dir, "key-A")
+	if err != nil || !resumed {
+		t.Fatalf("same key must resume: resumed=%v err=%v", resumed, err)
+	}
+	if _, err := os.Stat(done); err != nil {
+		t.Error("finished chunk must survive a resume")
+	}
+	for _, gone := range []string{part, list} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s (mid-write leftovers) must be dropped on resume", filepath.Base(gone))
+		}
+	}
+
+	resumed, err = prepareChunkDir(dir, "key-B")
+	if err != nil || resumed {
+		t.Fatalf("different key must start over: resumed=%v err=%v", resumed, err)
+	}
+	if _, err := os.Stat(done); !os.IsNotExist(err) {
+		t.Error("stale chunk from different settings must be cleared")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, ChunkMarker)); string(got) != "key-B" {
+		t.Errorf("marker = %q, want the new key", got)
+	}
+}
+
+func TestChunkKeyTracksEverythingThatChangesTheOutput(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "in.mkv")
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stale := filepath.Join(own, "enc00000.transcoded.mkv")
-	_ = os.WriteFile(stale, []byte("x"), 0o644)
-	if err := prepareChunkDir(own); err != nil {
-		t.Fatalf("a leftover smelt directory must be reusable: %v", err)
+	plan := []chunkRange{{seek: 0, offset: 0, length: 10 * time.Second, expect: 300}, {seek: 10 * time.Second, offset: 10 * time.Second, expect: 299}}
+	base := EncodeSpec{Codec: "h265", CRF: 24, Preset: "medium", ChunkDuration: 10 * time.Second}
+	k0 := chunkKey(src, base, plan)
+	if k0 != chunkKey(src, base, plan) {
+		t.Fatal("key must be deterministic")
 	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Error("stale chunk from an earlier attempt must be cleared")
+	same := base
+	same.AudioCodec, same.AudioBitrate, same.SubtitleMode, same.ChunkCooldown = "opus", "128k", "drop", time.Minute
+	same.DecodeBackend = "qsv"
+	same.ExtraArgs = []string{"-metadata", "title=x", "-b:a", "96k"}
+	if chunkKey(src, same, plan) != k0 {
+		t.Error("audio/subtitle/cooldown/decode-backend/output-arg changes do not alter chunk content and must not invalidate chunks")
 	}
-	if _, err := os.Stat(filepath.Join(own, ChunkMarker)); err != nil {
-		t.Error("marker must be (re)written")
+
+	differs := map[string]func(*EncodeSpec){
+		"crf":       func(s *EncodeSpec) { s.CRF = 30 },
+		"preset":    func(s *EncodeSpec) { s.Preset = "slow" },
+		"codec":     func(s *EncodeSpec) { s.Codec = "av1" },
+		"encoder":   func(s *EncodeSpec) { s.Encoder = "hevc_qsv"; s.Backend = "qsv" },
+		"chunk len": func(s *EncodeSpec) { s.ChunkDuration = 20 * time.Second },
+		"video arg": func(s *EncodeSpec) { s.ExtraArgs = []string{"-vf", "scale=1280:-2"} },
+		"hdr":       func(s *EncodeSpec) { s.HDR = &HDRInfo{ColorTransfer: "smpte2084", MaxCLL: 1000} },
+	}
+	for name, mut := range differs {
+		sp := base
+		mut(&sp)
+		if chunkKey(src, sp, plan) == k0 {
+			t.Errorf("changing %s must invalidate resumable chunks", name)
+		}
+	}
+	if chunkKey(src, base, plan[:1]) == k0 {
+		t.Error("a different plan must invalidate resumable chunks")
+	}
+	if err := os.WriteFile(src, []byte("changed content!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if chunkKey(src, base, plan) == k0 {
+		t.Error("a modified source file must invalidate resumable chunks")
+	}
+}
+
+func TestSplitExtraArgs(t *testing.T) {
+	video, output := splitExtraArgs([]string{
+		"-vf", "scale=1280:-2", "-x265-params", "aq-mode=3", "-profile:v", "main10",
+		"-metadata", "title=X", "-movflags", "+faststart", "-b:a", "96k", "-c:a", "libopus",
+		"-af", "volume=2", "-metadata:s:a:0", "language=eng", "-disposition:a:0", "default",
+		"-tag:v", "hvc1", "-pix_fmt", "yuv420p10le", "-filter:a", "loudnorm",
+	})
+	wantVideo := []string{"-vf", "scale=1280:-2", "-x265-params", "aq-mode=3", "-profile:v", "main10", "-pix_fmt", "yuv420p10le"}
+	if !slices.Equal(video, wantVideo) {
+		t.Errorf("video = %v, want %v", video, wantVideo)
+	}
+	wantOutput := []string{
+		"-metadata", "title=X", "-movflags", "+faststart", "-b:a", "96k", "-c:a", "libopus",
+		"-af", "volume=2", "-metadata:s:a:0", "language=eng", "-disposition:a:0", "default",
+		"-tag:v", "hvc1", "-filter:a", "loudnorm",
+	}
+	if !slices.Equal(output, wantOutput) {
+		t.Errorf("output = %v, want %v", output, wantOutput)
+	}
+	if v, o := splitExtraArgs(nil); v != nil || o != nil {
+		t.Errorf("nil in, nil out: %v %v", v, o)
+	}
+	// A trailing output flag with no value must not panic.
+	if _, o := splitExtraArgs([]string{"-metadata"}); len(o) != 1 {
+		t.Errorf("dangling flag: %v", o)
+	}
+}
+
+func TestChunkedAppliesExtraArgsToTheRightStage(t *testing.T) {
+	spec := EncodeSpec{Codec: "h265", CRF: 24, SubtitleMode: "copy", ExtraArgs: []string{"-vf", "scale=1280:-2", "-metadata", "title=X", "-movflags", "+faststart"}}
+	seg := strings.Join(segmentArgs("in.mkv", "enc.mkv", chunkRange{length: time.Second}, spec), " ")
+	if !strings.Contains(seg, "-vf scale=1280:-2") || strings.Contains(seg, "-metadata") || strings.Contains(seg, "-movflags") {
+		t.Errorf("segment args must carry only video arguments: %s", seg)
+	}
+	join := strings.Join(joinArgs("l.txt", "in.mkv", "out.mkv", 0, spec), " ")
+	if !strings.Contains(join, "-metadata title=X -movflags +faststart") || strings.Contains(join, "scale=") {
+		t.Errorf("join args must carry only container/metadata arguments: %s", join)
+	}
+	if !strings.HasSuffix(join, "-y out.mkv") {
+		t.Errorf("destination must stay last: %s", join)
 	}
 }
 
@@ -215,5 +327,141 @@ func TestJoinErrorIsNotExecError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Errorf("message lost: %v", err)
+	}
+}
+
+// framesAt returns n timestamps at the given fps starting at start.
+func framesAt(n int, fps, start float64) []float64 {
+	out := make([]float64, n)
+	for i := range out {
+		out[i] = start + float64(i)/fps
+	}
+	return out
+}
+
+// Every planned boundary must sit between two frames - never on one - and the
+// per-chunk expected counts must account for every frame exactly once.
+func TestPlanChunksFromPTSBoundariesAreMidGapAndPartition(t *testing.T) {
+	cases := map[string][]float64{
+		"29.97fps":     framesAt(1199, 30000.0/1001, 0),
+		"24fps":        framesAt(960, 24, 0),
+		"25fps+offset": framesAt(825, 25, 2.0),
+	}
+	for name, pts := range cases {
+		vstart := time.Duration(pts[0] * float64(time.Second))
+		chunks := planChunksFromPTS(pts, 10*time.Second, vstart)
+		if len(chunks) < 3 {
+			t.Fatalf("%s: got %d chunks", name, len(chunks))
+		}
+		sum := 0
+		for _, c := range chunks {
+			sum += c.expect
+			if c.expect <= 0 {
+				t.Errorf("%s: chunk with expect=%d", name, c.expect)
+			}
+		}
+		if sum != len(pts) {
+			t.Errorf("%s: expected counts sum to %d, source has %d frames", name, sum, len(pts))
+		}
+		// Absolute boundary times (file timeline) vs. the frame timestamps.
+		var minGap = 1e9
+		for k := 1; k < len(chunks); k++ {
+			b := chunks[k].seek.Seconds() // vstart==pts[0], file start 0 => absolute
+			for _, p := range pts {
+				if d := abs(p - b); d < minGap {
+					minGap = d
+				}
+			}
+		}
+		frame := 1 / (30000.0 / 1001)
+		switch name {
+		case "24fps":
+			frame = 1.0 / 24
+		case "25fps+offset":
+			frame = 1.0 / 25
+		}
+		if minGap < frame/2-0.0005 {
+			t.Errorf("%s: a boundary is only %.4fs from a frame (< half a frame, %.4fs): decoders may disagree on which chunk owns it", name, minGap, frame/2)
+		}
+	}
+}
+
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
+func TestPlanChunksFromPTSVariableFrameRate(t *testing.T) {
+	// 20 s at 30 fps, then 20 s at 10 fps.
+	pts := framesAt(600, 30, 0)
+	pts = append(pts, framesAt(200, 10, 20.0)...)
+	chunks := planChunksFromPTS(pts, 10*time.Second, 0)
+	sum := 0
+	for _, c := range chunks {
+		sum += c.expect
+	}
+	if sum != len(pts) || len(chunks) != 4 {
+		t.Fatalf("chunks=%d sum=%d, want 4 chunks covering %d frames", len(chunks), sum, len(pts))
+	}
+	if chunks[1].expect != 300 || chunks[2].expect != 100 {
+		t.Errorf("per-chunk counts follow the real timestamps: %+v", chunks)
+	}
+}
+
+func TestPlanChunksFromPTSEdgeCases(t *testing.T) {
+	if planChunksFromPTS(nil, 10*time.Second, 0) != nil {
+		t.Error("no timestamps: nil")
+	}
+	if planChunksFromPTS(framesAt(100, 25, 0), 10*time.Second, 0) != nil {
+		t.Error("4 s source with 10 s chunks: nil")
+	}
+	// B-frame reorder: timestamps arrive out of order.
+	pts := framesAt(600, 24, 0)
+	pts[10], pts[11] = pts[11], pts[10]
+	pts[300], pts[302] = pts[302], pts[300]
+	if c := planChunksFromPTS(pts, 10*time.Second, 0); len(c) < 2 {
+		t.Errorf("reordered timestamps must still plan: %v", c)
+	}
+}
+
+func TestParsePTSList(t *testing.T) {
+	got := parsePTSList("0.000000,\n0.041000,\nN/A,\n\n0.083000\n")
+	if len(got) != 3 || got[2] != 0.083 {
+		t.Errorf("parsePTSList = %v", got)
+	}
+}
+
+func TestConcatListCarriesExplicitDurations(t *testing.T) {
+	got := concatList([]string{"a.mkv", "b.mkv"}, []time.Duration{10010 * time.Millisecond, 13981 * time.Millisecond})
+	want := "file 'a.mkv'\nduration 10.010000\nfile 'b.mkv'\nduration 13.981000\n"
+	if got != want {
+		t.Errorf("concatList = %q, want %q", got, want)
+	}
+	// If any span is unknown, fall back to the demuxer's own measurement
+	// rather than emitting a wrong duration.
+	partial := concatList([]string{"a.mkv", "b.mkv"}, []time.Duration{10 * time.Second, 0})
+	if strings.Contains(partial, "duration") {
+		t.Errorf("partial spans must not be emitted: %q", partial)
+	}
+}
+
+func TestPlanChunksFromPTSSpansTileTheTimeline(t *testing.T) {
+	pts := framesAt(1019, 30000.0/1001, 1.5)
+	chunks := planChunksFromPTS(pts, 10*time.Second, 1500*time.Millisecond)
+	var total time.Duration
+	for _, c := range chunks {
+		if c.span <= 0 {
+			t.Fatalf("every chunk needs a span: %+v", c)
+		}
+		total += c.span
+	}
+	end := time.Duration((pts[len(pts)-1] - pts[0] + 1/(30000.0/1001)) * float64(time.Second))
+	if d := total - end; d < -2*time.Millisecond || d > 2*time.Millisecond {
+		t.Errorf("spans sum to %v, want the full video span %v", total, end)
+	}
+	if d := chunks[1].span - chunks[0].span; d < -40*time.Millisecond || d > 40*time.Millisecond {
+		t.Errorf("neighbouring spans should be ~10 s: %v vs %v", chunks[0].span, chunks[1].span)
 	}
 }
