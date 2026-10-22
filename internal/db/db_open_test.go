@@ -16,7 +16,7 @@ func TestOpenAppliesPragmasToEveryConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 
 	ctx := context.Background()
 	var conns []interface{ Close() error }
@@ -51,12 +51,12 @@ func TestConcurrentWritersDoNotLoseRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
+	t.Cleanup(func() { _ = a.Close() })
 	b, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.Close()
+	t.Cleanup(func() { _ = b.Close() })
 
 	const writers, perWriter = 8, 100
 	var wg sync.WaitGroup
@@ -109,7 +109,7 @@ func TestOpenPathWithSpecialCharacters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 	if err := d.Insert(Record{SourcePath: "/m/a.mkv", Status: "done", CompletedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
