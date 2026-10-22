@@ -3,7 +3,9 @@ services:
     image: ghcr.io/raina-hardik/smelt:latest
     command: serve --addr 0.0.0.0:7700 --db /data/history.db --scripts-dir /data/scripts
     ports:
-      - "7700:7700"
+      # Published on the host loopback only: the API has no authentication.
+      # Put an authenticating reverse proxy in front before exposing it.
+      - "127.0.0.1:7700:7700"
     volumes:
       - ./data:/data
       # Mount your media library so triggered programs can reach it, e.g.:

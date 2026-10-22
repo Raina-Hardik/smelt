@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -22,8 +24,19 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, api.Error{Error: msg})
 }
 
-func decodeJSON(r *http.Request, dst any) error {
-	return json.NewDecoder(r.Body).Decode(dst)
+// maxBodyBytes caps request bodies; program definitions are tiny.
+const maxBodyBytes = 1 << 20
+
+var errNotJSON = errors.New("Content-Type must be application/json")
+
+// decodeJSON requires an explicit JSON content type — this rejects the
+// text/plain bodies a cross-site form or fetch can send without a CORS
+// preflight — and bounds the body size.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		return errNotJSON
+	}
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(dst)
 }
 
 // Aliases to the generated wire types, named for what handlers_test.go
@@ -111,7 +124,11 @@ func (s *Server) ListPrograms(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) CreateProgram(w http.ResponseWriter, r *http.Request) {
 	var body api.ProgramInput
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
+		if errors.Is(err, errNotJSON) {
+			writeError(w, http.StatusUnsupportedMediaType, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -120,11 +137,9 @@ func (s *Server) CreateProgram(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "src is required")
 		return
 	}
-	for _, rule := range inp.rules {
-		if err := workflow.ValidateRule(rule); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
-			return
-		}
+	if err := workflow.ValidateProgramInput(inp.name, inp.schedule, inp.src, inp.ext, inp.rules); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid program: "+err.Error())
+		return
 	}
 
 	rulesJSON, err := marshalRules(inp.rules)
@@ -188,7 +203,11 @@ func (s *Server) UpdateProgram(w http.ResponseWriter, r *http.Request, id api.Pr
 	}
 
 	var body api.ProgramInput
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
+		if errors.Is(err, errNotJSON) {
+			writeError(w, http.StatusUnsupportedMediaType, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -197,11 +216,9 @@ func (s *Server) UpdateProgram(w http.ResponseWriter, r *http.Request, id api.Pr
 		writeError(w, http.StatusBadRequest, "src is required")
 		return
 	}
-	for _, rule := range inp.rules {
-		if err := workflow.ValidateRule(rule); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
-			return
-		}
+	if err := workflow.ValidateProgramInput(inp.name, inp.schedule, inp.src, inp.ext, inp.rules); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid program: "+err.Error())
+		return
 	}
 
 	rulesJSON, err := marshalRules(inp.rules)

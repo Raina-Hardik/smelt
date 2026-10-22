@@ -125,11 +125,19 @@ docker run --rm -v /mnt/media:/media ghcr.io/raina-hardik/smelt:latest \
 
 # Run smelt serve for the dashboard WebUI: publish the port, and persist the
 # history DB and rendered program scripts outside the container
-docker run -d --name smelt-serve -p 7700:7700 \
+docker run -d --name smelt-serve -p 127.0.0.1:7700:7700 \
     -v smelt-data:/data \
     ghcr.io/raina-hardik/smelt:latest \
     serve --addr 0.0.0.0:7700 --db /data/history.db --scripts-dir /data/scripts
 ```
+
+**`smelt serve` has no authentication.** Anyone who can reach the port can
+create and run programs, which execute as the user running the server. Keep it
+on loopback (the default, and `-p 127.0.0.1:...` above) and put an
+authenticating reverse proxy in front of it if it must be reachable from other
+machines. Requests that carry a cross-site `Origin`, or a non-loopback `Host`
+while bound to loopback, are refused, and request bodies must be
+`application/json`.
 
 The image has no hardware-acceleration device passthrough configured by
 default; add `--device /dev/dri` (VAAPI/QSV) or the NVIDIA container runtime

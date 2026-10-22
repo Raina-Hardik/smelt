@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -86,12 +87,12 @@ func Render(p Program, opts Options) string {
 	fmt.Fprintf(&b, "LOCK=\"${TMPDIR:-/tmp}/smelt-%s.lock\"\n", sanitize(name))
 	b.WriteString("if command -v flock >/dev/null 2>&1; then\n")
 	b.WriteString("\texec 9>\"$LOCK\"\n")
-	fmt.Fprintf(&b, "\tflock -n 9 || { echo \"smelt program %s: already running\" >&2; exit 0; }\n", name)
+	fmt.Fprintf(&b, "\tflock -n 9 || { echo %s >&2; exit 0; }\n", shellQuote("smelt program "+name+": already running"))
 	b.WriteString("fi\n\n")
 
 	// Optional gum affordance — TTY-gated, never blocks cron.
 	b.WriteString("if [ -t 1 ] && command -v gum >/dev/null 2>&1; then\n")
-	fmt.Fprintf(&b, "\tgum style --border normal \"smelt: %s\"\n", name)
+	fmt.Fprintf(&b, "\tgum style --border normal %s\n", shellQuote("smelt: "+name))
 	b.WriteString("fi\n\n")
 
 	// Run identity: honour a server-injected SMELT_RUN_ID, else generate one so
@@ -355,4 +356,56 @@ func condToFlag(field, op string) string {
 		return ""
 	}
 	return "--" + field + "-" + op
+}
+
+// safeArgRe matches a single shell-inert token: either a bare word of
+// characters with no shell meaning, or a complete single-quoted string (the
+// form TranscodeArgs emits) with no embedded quote.
+var safeArgRe = regexp.MustCompile(`^(?:[A-Za-z0-9_./:=,@%+-]+|'[^'\x00-\x1f\x7f]*')$`)
+
+// hasControl reports whether s contains a control character (newline, NUL,
+// ...). Manifest fields are written into '#' comment lines, where a newline
+// would end the comment and start a shell command.
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
+}
+
+// ValidateProgramInput checks untrusted program definitions (the server API
+// decodes them straight from JSON) before they are rendered into a shell
+// script that smelt later executes. Every text field must be free of control
+// characters, the action must be a known command, and action args must each
+// be a single shell-inert token — anything else would be injected into the
+// script verbatim.
+func ValidateProgramInput(name, schedule, src string, ext []string, rules []Rule) error {
+	for label, v := range map[string]string{"name": name, "schedule": schedule, "src": src} {
+		if hasControl(v) {
+			return fmt.Errorf("%s must not contain control characters", label)
+		}
+	}
+	for _, e := range ext {
+		if hasControl(e) || strings.ContainsAny(e, ", ") {
+			return fmt.Errorf("invalid extension %q", e)
+		}
+	}
+	for i, r := range rules {
+		if err := ValidateRule(r); err != nil {
+			return fmt.Errorf("rule %d: %w", i+1, err)
+		}
+		for _, c := range r.When {
+			if hasControl(c.Value) || strings.ContainsAny(c.Value, " \t") {
+				return fmt.Errorf("rule %d: condition value %q must not contain whitespace or control characters", i+1, c.Value)
+			}
+		}
+		switch r.Do.Cmd {
+		case "transcode", "check", "skip", "copy":
+		default:
+			return fmt.Errorf("rule %d: unknown action %q (valid: transcode, check, skip)", i+1, r.Do.Cmd)
+		}
+		for _, a := range r.Do.Args {
+			if !safeArgRe.MatchString(a) {
+				return fmt.Errorf("rule %d: action arg %q is not allowed (use plain flag tokens such as --codec h265)", i+1, a)
+			}
+		}
+	}
+	return nil
 }
