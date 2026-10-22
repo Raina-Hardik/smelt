@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"bytes"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
@@ -60,5 +63,28 @@ func TestEnvVarPrecedenceBelowFlagAboveConfig(t *testing.T) {
 	_ = fs.Set("codec", "flag-codec")
 	if got := viper.GetString("transcode.codec"); got != "flag-codec" {
 		t.Errorf("explicit flag should override env: got %q, want flag-codec", got)
+	}
+}
+
+func TestConfigureLoggerDurationsInSeconds(t *testing.T) {
+	configureLogger("info", "json")
+	var buf bytes.Buffer
+	l := zerolog.New(&buf)
+	l.Info().Dur("elapsed", 21374*time.Millisecond).Msg("x")
+	if !strings.Contains(buf.String(), `"elapsed":21.374`) {
+		t.Errorf("elapsed not logged in seconds: %s", buf.String())
+	}
+}
+
+func TestRootVersionFlag(t *testing.T) {
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetArgs([]string{"--version"})
+	defer rootCmd.SetArgs(nil)
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(buf.String(), "smelt ") {
+		t.Errorf("--version output = %q", buf.String())
 	}
 }

@@ -27,10 +27,16 @@ var versionCmd = &cobra.Command{
 	Short: "Print smelt version information",
 	Long:  "Print smelt version information.",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("smelt %s (%s, %s/%s)\n", resolvedVersion(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		fmt.Println(versionLine())
 	},
 }
 
+func versionLine() string {
+	return fmt.Sprintf("smelt %s (%s, %s/%s)", resolvedVersion(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
 func init() {
+	rootCmd.Version = resolvedVersion()
+	rootCmd.SetVersionTemplate(versionLine() + "\n")
 	rootCmd.AddCommand(versionCmd)
 }
