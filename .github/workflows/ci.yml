@@ -54,7 +54,7 @@ jobs:
 
   release-create:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, lint]
+    needs: [test, lint, integration]
     permissions:
       contents: write
     runs-on: ubuntu-latest
