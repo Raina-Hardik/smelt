@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,7 @@ var (
 	ffmpegRun         = ffmpeg.Run
 	probeAttrs        = ffmpeg.ProbeAttrs
 	probeHDR          = ffmpeg.ProbeHDR
+	probeHealth       = ffmpeg.ProbeHealth
 	probeDecode       = ffmpeg.ProbeDecode
 	probeEncoder10Bit = ffmpeg.ProbeEncoder10Bit
 )
@@ -365,6 +367,17 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		return err
 	}
 
+	// --inplace is about to replace the original: refuse unless the new file
+	// is demonstrably a sane encode of it. ffmpeg exiting 0 is not enough (a
+	// truncated or empty output also exits 0 in some failure modes).
+	if p.cfg.InPlace {
+		if verr := verifyOutput(ctx, f.Path, tmp); verr != nil {
+			err = fmt.Errorf("refusing to replace %s: %w", f.Path, verr)
+			p.record(f, dst, spec, time.Since(start), err)
+			return err
+		}
+	}
+
 	// Preserve the source file's permission bits on the output so that
 	// restricted files (e.g. 0600) are not silently opened up after transcode.
 	if f.Mode != 0 {
@@ -377,6 +390,43 @@ func (p *Pool) transcode(ctx context.Context, f scanner.MediaFile, onProgress fu
 		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
 	}
 	p.record(f, dst, spec, time.Since(start), nil)
+	return nil
+}
+
+// verifyOutput checks that the freshly encoded out is a plausible replacement
+// for src: it must be readable, contain a video stream, and have (when both
+// durations are known) about the same duration. Tolerance is 2 s or 2%,
+// whichever is larger, to allow for container timestamp rounding.
+func verifyOutput(ctx context.Context, src, out string) error {
+	fi, err := os.Stat(out)
+	if err != nil {
+		return fmt.Errorf("output missing: %w", err)
+	}
+	if fi.Size() == 0 {
+		return errors.New("output is empty")
+	}
+	h, err := probeHealth(ctx, out)
+	if err != nil {
+		return fmt.Errorf("output is unreadable: %w", err)
+	}
+	if !h.HasVideo {
+		return errors.New("output has no video stream")
+	}
+	in, err := probeHealth(ctx, src)
+	if err != nil || in.Duration <= 0 || h.Duration <= 0 {
+		return nil // can't compare durations; the structural checks passed
+	}
+	diff := h.Duration - in.Duration
+	if diff < 0 {
+		diff = -diff
+	}
+	tol := in.Duration / 50
+	if tol < 2*time.Second {
+		tol = 2 * time.Second
+	}
+	if diff > tol {
+		return fmt.Errorf("output duration %s differs from source %s by more than %s", h.Duration.Round(time.Second), in.Duration.Round(time.Second), tol.Round(time.Second))
+	}
 	return nil
 }
 
@@ -535,6 +585,14 @@ func Plan(ctx context.Context, files []scanner.MediaFile, cfg *config.Config, da
 		own := files[:0:0]
 		for _, f := range files {
 			if isOwnOutput(f.Path, "") {
+				skipped++
+				continue
+			}
+			// Replacing a symlink in place swaps the link for a regular file
+			// (breaking the link) while its target is also in the list and
+			// gets encoded a second time. Leave links alone.
+			if fi, err := os.Lstat(f.Path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				log.Warn().Str("file", f.Path).Msg("skipped: symlink (--inplace would replace the link with a regular file); transcode the link's target instead")
 				skipped++
 				continue
 			}

@@ -3,11 +3,14 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Raina-Hardik/smelt/internal/config"
 	"github.com/Raina-Hardik/smelt/internal/ffmpeg"
+	"github.com/Raina-Hardik/smelt/internal/scanner"
 )
 
 func TestTranscodePassesHDRToSpec(t *testing.T) {
@@ -117,5 +120,47 @@ func TestJoinFailureDoesNotRetry(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("ffmpeg ran %d times, want 1 (no retry for a join failure)", calls)
+	}
+}
+
+// End to end through Pool.transcode: with --inplace, an output that fails
+// verification must leave the original byte-for-byte intact and remove the
+// temporary file.
+func TestInplaceKeepsOriginalWhenOutputFailsVerification(t *testing.T) {
+	for name, healthy := range map[string]bool{"bad output": false, "good output": true} {
+		t.Run(name, func(t *testing.T) {
+			hwDecodeStubs(t)
+			probeHealth = func(_ context.Context, path string) (*ffmpeg.FileHealth, error) {
+				return &ffmpeg.FileHealth{HasVideo: healthy}, nil
+			}
+			dir := t.TempDir()
+			src := filepath.Join(dir, "in.mkv")
+			if err := os.WriteFile(src, []byte("ORIGINAL"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ffmpegRun = func(_ context.Context, _, dst string, _ ffmpeg.EncodeSpec, _ func(ffmpeg.ProgressEvent)) error {
+				return os.WriteFile(dst, []byte("ENCODED"), 0o644)
+			}
+			cfg := &config.Config{Workers: 1, HWDecode: "auto", Codec: "h265", InPlace: true, Src: dir}
+			pool := newResolvedPool(cfg, "hevc_vaapi", "vaapi")
+			err := pool.transcode(context.Background(), scanner.MediaFile{Path: src, RelPath: "in.mkv"}, nil)
+
+			got, _ := os.ReadFile(src)
+			if healthy {
+				if err != nil || string(got) != "ENCODED" {
+					t.Errorf("healthy output should replace the original: err=%v content=%q", err, got)
+				}
+				return
+			}
+			if err == nil {
+				t.Error("expected a refusal error")
+			}
+			if string(got) != "ORIGINAL" {
+				t.Errorf("original was modified: %q", got)
+			}
+			if left, _ := filepath.Glob(filepath.Join(dir, "*.transcoded.*")); len(left) != 0 {
+				t.Errorf("temporary output left behind: %v", left)
+			}
+		})
 	}
 }
