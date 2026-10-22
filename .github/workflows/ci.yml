@@ -21,6 +21,25 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  integration:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | head -1
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx265|libsvtav1" || true
+      - run: go test -tags integration -count=1 -timeout 8m ./...
+
   lint:
     permissions:
       contents: read
@@ -36,7 +55,7 @@ jobs:
 
   release-create:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, lint]
+    needs: [test, lint, integration]
     permissions:
       contents: write
     runs-on: ubuntu-latest

@@ -765,6 +765,14 @@ profiles:
 
 ---
 
+## Other environment variables
+
+| Variable | Effect |
+|---|---|
+| `SMELT_VAAPI_DEVICE` | Linux only. DRM render node used for VAAPI encode, decode and probing (default `/dev/dri/renderD128`). Not a config key; set it in the environment. |
+
+---
+
 ## Precedence
 
 Settings are resolved in this order (highest wins):

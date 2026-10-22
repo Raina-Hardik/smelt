@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,11 @@ func TestProbeDolbyVisionNegative(t *testing.T) {
 
 // TestHDR10RoundTripIntegration encodes an HDR10 source through Run for each
 // software encoder and verifies colour tags and static metadata survive.
+//
+// Note: ffmpeg 8.x already carries this metadata through plain libx265 and
+// SVT-AV1 re-encodes, so this guards the end-to-end result (and older builds,
+// where hdrArgs does the work), not hdrArgs in isolation. The unit tests in
+// hdr_test.go are what pin the exact arguments smelt emits.
 func TestHDR10RoundTripIntegration(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.mkv")
@@ -269,8 +275,11 @@ func TestChunkedMatchesSinglePassIntegration(t *testing.T) {
 			if err := Run(ctx, src, dst, chunked, nil); err != nil {
 				t.Fatalf("chunked: %v", err)
 			}
-			if a, b := framesOf(t, single), framesOf(t, dst); a != b {
-				t.Errorf("frame count: single=%s chunked=%s", a, b)
+			// The source's own frame count is the truth: chunking must neither
+			// drop nor duplicate frames. (Single-pass mp4 on some ffmpeg builds
+			// pads one extra frame, so it is not a reliable oracle for mp4.)
+			if a, b := framesOf(t, src), framesOf(t, dst); a != b {
+				t.Errorf("frame count: source=%s chunked=%s", a, b)
 			}
 			dur := func(p string) time.Duration { d, _ := probeDuration(ctx, p); return d }
 			if d1, d2 := dur(single), dur(dst); d2 < d1-100*time.Millisecond || d2 > d1+100*time.Millisecond {
@@ -325,15 +334,18 @@ func TestChunkedKeepsVideoStartOffsetIntegration(t *testing.T) {
 	if err := Run(ctx, src, dst, chunked, nil); err != nil {
 		t.Fatal(err)
 	}
-	if a, b := framesOf(t, single), framesOf(t, dst); a != b {
-		t.Errorf("frame count: single=%s chunked=%s (duplicated frames at a boundary?)", a, b)
+	if a, b := framesOf(t, src), framesOf(t, dst); a != b {
+		t.Errorf("frame count: source=%s chunked=%s (duplicated frames at a boundary?)", a, b)
 	}
-	start := func(p string) string {
+	start := func(p string) float64 {
 		out, _ := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=start_time", "-of", "csv=p=0", p).Output()
-		return strings.TrimSpace(string(out))
+		v, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+		return v
 	}
-	if a, b := start(single), start(dst); a != b {
-		t.Errorf("video start_time: single=%s chunked=%s", a, b)
+	// The 2 s offset must survive (a lost offset would read ~0). Encoder delay
+	// shifts it by a fraction of a frame depending on the ffmpeg build.
+	if a, b := start(single), start(dst); b < 1.9 || a-b > 0.05 || b-a > 0.05 {
+		t.Errorf("video start_time: single=%v chunked=%v, want both ~2.0 within 50ms of each other", a, b)
 	}
 }
 

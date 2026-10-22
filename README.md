@@ -66,7 +66,7 @@ lag behind GitHub's tags. If `go install ...@latest` doesn't pick up a release
 you know exists, pin the version explicitly instead of waiting on the proxy:
 
 ```bash
-GOPROXY=https://proxy.golang.org,direct go install github.com/Raina-Hardik/smelt@v0.17.0
+GOPROXY=https://proxy.golang.org,direct go install github.com/Raina-Hardik/smelt@latest
 ```
 
 ---
