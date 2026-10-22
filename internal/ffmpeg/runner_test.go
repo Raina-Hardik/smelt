@@ -116,7 +116,7 @@ func TestBuildArgs(t *testing.T) {
 	got := buildArgs("in.mkv", "out.mkv", spec)
 	want := []string{
 		"-hide_banner", "-i", "in.mkv",
-		"-map", "0:v:0", "-map", "0:a", "-map", "0:s?", "-c:s", "copy",
+		"-map", "0:v:0", "-map", "0:a?", "-map", "0:s?", "-c:s", "copy",
 		"-c:v", "libx265", "-crf", "23", "-preset", "medium",
 		"-c:a", "copy",
 		"-movflags", "+faststart",
