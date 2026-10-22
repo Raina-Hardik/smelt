@@ -591,14 +591,23 @@ func TestChunkedHasNoTimingSeamsIntegration(t *testing.T) {
 			if len(in) != len(out) {
 				t.Fatalf("frames: source=%d output=%d", len(in), len(out))
 			}
+			// Compare each frame's position relative to the stream's own first
+			// frame: a stalled or shifted seam shows up as a step in this
+			// series, whereas a constant offset (encoder delay differs between
+			// ffmpeg builds) does not.
 			worst := 0.0
 			for i := range in {
-				if d := math.Abs(in[i] - out[i]); d > worst {
+				if d := math.Abs((out[i] - out[0]) - (in[i] - in[0])); d > worst {
 					worst = d
 				}
 			}
 			if worst > 0.01 {
-				t.Errorf("worst per-frame timestamp error = %.1f ms, want <= 10 ms (a stalled or shifted seam)", worst*1000)
+				t.Errorf("worst per-frame timeline error = %.1f ms, want <= 10 ms (a stalled or shifted seam)", worst*1000)
+			}
+			// The video must still start where the source's did, give or take
+			// one frame of encoder delay.
+			if d := out[0] - in[0]; d < -0.045 || d > 0.045 {
+				t.Errorf("video start moved by %.1f ms (source %.4f, output %.4f)", d*1000, in[0], out[0])
 			}
 			if g := maxGap(out); g > 0.045 { // nominal 0.0334; a stalled seam shows as ~0.066
 				t.Errorf("largest frame gap = %.1f ms, want ~33 ms", g*1000)
